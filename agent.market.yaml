@@ -1,0 +1,45 @@
+apiVersion: agent.market/v1
+kind: Agent
+
+metadata:
+  name: web-terminal
+  displayName: agent.market Web Terminal
+  version: 0.1.0
+  description: Browser terminal with Codex, tmux, UTF-8 locale, and the agent.market runtime setup.
+
+runtime:
+  mode: service
+  platform: linux/amd64
+  image: ghcr.io/<org>/web-terminal@sha256:<publish-time-digest>
+  command: ["/usr/local/bin/web-terminal"]
+  workingDir: /home/boxlite
+  user: boxlite
+  resources:
+    cpu: 2
+    memoryMiB: 4096
+    diskGiB: 20
+    timeoutSeconds: 86400
+  network:
+    egress:
+      mode: allowlist
+      # Initial API-key workflow only; login/Git access need reviewed additions.
+      domains: [api.openai.com]
+
+service:
+  port: 3001
+  protocol: http
+  websocket: true
+  access: authenticated-preview
+  readiness:
+    path: /healthz
+    timeoutSeconds: 60
+
+permissions:
+  workspace:
+    input: read
+    output: write
+  capabilities: []
+
+healthcheck:
+  command: ["sh", "-ec", "test \"$(id -u)\" != 0; command -v codex; codex --version; tmux -V; curl -fsS http://127.0.0.1:3001/healthz"]
+  timeoutSeconds: 15
