@@ -1,6 +1,6 @@
 # Web Terminal 与 agent.market 的边界
 
-完整镜像采用 **Builder 自建完整镜像 → GHCR Public → agent.market 导入并测试 → 发布**。当前网站先用 python:slim mock 验证发布流程，详见 [mock 后端说明](../agent.market/backend/README.md)；本文件保留正式镜像的边界。
+完整镜像采用 **Builder 自建完整镜像 → GHCR Public → agent.market 导入并测试 → 发布**。当前网站先用 python:slim mock 验证发布流程，详见 [mock 后端说明](../../agent.market/backend/README.md)；本文件保留正式镜像的边界。
 具体操作以 [ghcr-publish.md](./ghcr-publish.md) 和 [Dockerfile](./Dockerfile) 为准，不维护第二份可能漂移的 Dockerfile 示例。
 
 ## Builder 交付什么
@@ -40,4 +40,4 @@
 - 平台必须区分“无出站权限”和“删除整个网络接口”，后者可能使服务预览也失效。无法同时实施隔离和预览时应拒绝启动，不能静默放开网络。
 - GHCR 引用被删除后仍可能无法冷启动；digest 不是永久可用性保证。长期托管 Registry 应复制并保留已发布镜像，迁移后重新验证运行引用。
 
-平台契约和验收清单见 [Agent Package Specification](../agent.market/agent-package-spec.md)。
+平台契约和验收清单见 [Agent Package Specification](../../agent.market/agent-package-spec.md)。

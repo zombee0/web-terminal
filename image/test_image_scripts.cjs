@@ -31,7 +31,10 @@ test('build uses its own source directory, loads locally and never pushes', t =>
   const ctx = environment(t), result = run('build_web_terminal_image.sh', ctx);
   assert.equal(result.status, 0, result.stderr);
   const log = fs.readFileSync(ctx.log, 'utf8');
-  assert.match(log, /--load/); assert.ok(log.includes(__dirname)); assert.doesNotMatch(log, /--push/);
+  assert.match(log, /--load/);
+  assert.ok(log.includes(`--file ${path.join(__dirname, 'Dockerfile')}`));
+  assert.ok(log.endsWith(`${path.dirname(__dirname)}\n`));
+  assert.doesNotMatch(log, /--push/);
 });
 test('unsupported architecture fails before Docker is called', t => {
   const ctx = environment(t), result = run('build_web_terminal_image.sh', ctx, { PLATFORM: 'linux/arm64' });

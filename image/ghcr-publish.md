@@ -12,12 +12,12 @@ export IMAGE_VERSION=0.1.0
 export BASE_IMAGE=python:slim
 # 可选：真实源码仓库，用于 GHCR Package 关联
 export SOURCE_REPOSITORY=https://github.com/your-org/your-repo
-bash web_terminal/build_web_terminal_image.sh
+bash image/build_web_terminal_image.sh
 ```
 
 从 workspace 根目录调用上述脚本即可；脚本也支持其他工作目录下的绝对路径调用。源码以多阶段方式编译，最终镜像从 `python:slim` 安装 Bash、Codex、tmux、locale 和字体，不依赖旧 Box 已安装的软件。它以 `boxlite` 用户运行，默认 ENTRYPOINT 启动 3001 前台服务。
 
-`deploy_web_terminal.py` 和 `update_web_terminal.py` 使用 `build/web-terminal-linux-amd64`；运行 `build_web_terminal_binary.sh` 可单独生成该文件。`build/` 不受 Git 跟踪，Docker 镜像构建也不会覆盖本地产物。
+`deploy_web_terminal.py` 和 `update_web_terminal.py` 使用 `build/web-terminal-linux-amd64`；在项目根目录运行 `build_web_terminal_binary.sh` 可单独生成该文件。`build/` 不受 Git 跟踪，Docker 镜像构建也不会覆盖本地产物。
 
 ### 可复现性的准确边界
 
@@ -35,7 +35,7 @@ bash web_terminal/build_web_terminal_image.sh
 ## 2. 验证本地镜像
 
 ```bash
-LOCAL_IMAGE=web-terminal:0.1.0 bash web_terminal/test_web_terminal_image.sh
+LOCAL_IMAGE=web-terminal:0.1.0 bash image/test_web_terminal_image.sh
 ```
 
 脚本检查架构、非 root 身份、Codex/tmux、UTF-8，然后启动容器，在随机分配的 **127.0.0.1** 端口轮询 /healthz 和首页，退出时只停止自身创建的测试容器。它不会验证 BoxLite，也不会访问模型 API。
@@ -86,7 +86,7 @@ echo
 printf '%s' "$GHCR_PAT" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
 unset GHCR_PAT
 
-bash web_terminal/push_web_terminal_image.sh
+bash image/push_web_terminal_image.sh
 ```
 
 推送脚本重新执行本地 smoke test、tag、push，并显示 registry manifest 信息；**不会重新构建镜像，也不会把 Package 改为 public**。不要复用已发布版本 tag，不要把 PAT 写进源码、镜像 ARG/ENV、manifest 或 agent.market 表单。

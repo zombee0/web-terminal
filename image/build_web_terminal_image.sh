@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Local build only. Publishing is an explicit, separate operation.
-build_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+image_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+project_dir="$(cd -- "${image_dir}/.." && pwd)"
 
 base_image="${BASE_IMAGE:-python:slim}"
 platform="${PLATFORM:-linux/amd64}"
@@ -14,6 +15,7 @@ fi
 command -v docker >/dev/null
 
 docker buildx build \
+  --file "${image_dir}/Dockerfile" \
   --platform "$platform" \
   --build-arg "BASE_IMAGE=${base_image}" \
   --build-arg "GO_IMAGE=${GO_IMAGE:-golang:1.26.5-bookworm}" \
@@ -22,7 +24,7 @@ docker buildx build \
   --label "org.opencontainers.image.source=${SOURCE_REPOSITORY:-}" \
   --label "org.opencontainers.image.version=${IMAGE_VERSION:-0.1.0}" \
   --load \
-  "$build_dir"
+  "$project_dir"
 
 echo "Built locally: ${tag} (not pushed). Existing copy-in binary is unchanged."
-echo "Next: LOCAL_IMAGE=${tag} bash ${build_dir}/test_web_terminal_image.sh"
+echo "Next: LOCAL_IMAGE=${tag} bash ${image_dir}/test_web_terminal_image.sh"
