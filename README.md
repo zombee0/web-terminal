@@ -17,6 +17,10 @@ If deployment is interrupted, set `BOXLITE_BOX_ID` and run the deployment
 script again to continue provisioning the existing Box instead of creating a
 new one.
 
+After deployment succeeds, the script prints an authenticated preview URL with
+`BOXLITE_BOX_AUTH_KEY` in its query string. Treat the complete URL as a secret:
+do not commit it, publish it, or include it in ordinary logs.
+
 ## Network Exposure
 
 The custom Web Terminal listens on port `3001`. It is the only terminal port

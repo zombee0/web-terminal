@@ -7,6 +7,7 @@ import pathlib
 import secrets
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 
@@ -103,6 +104,15 @@ def api(method, path, payload=None):
         request.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode() or "{}")
+
+
+def authenticated_preview_url(preview):
+    parts = urllib.parse.urlsplit(preview["url"])
+    query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    query.append(("BOXLITE_BOX_AUTH_KEY", preview["token"]))
+    return urllib.parse.urlunsplit(
+        parts._replace(path=parts.path or "/", query=urllib.parse.urlencode(query))
+    )
 
 
 async def drain(stream, destination, captured):
@@ -215,7 +225,8 @@ async def main():
         timeout_secs=90,
     )
 
-    url = api("GET", f"/api/box/{box.id}/ports/{PORT}/preview-url")["url"]
+    preview = api("GET", f"/api/box/{box.id}/ports/{PORT}/preview-url")
+    url = authenticated_preview_url(preview)
     print(f"BOX_NAME={box_name}")
     print(f"URL={url}")
     print(f"To update this Box: BOXLITE_BOX_ID={box.id} python3 update_web_terminal.py")
