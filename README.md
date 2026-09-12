@@ -10,6 +10,7 @@ bash build_web_terminal_binary.sh
 
 Linux AMD64 二进制输出到 `build/web-terminal-linux-amd64`。`build/` 是本地编译产物目录，不受 Git 跟踪。
 部署和更新脚本在该二进制不存在时会自动执行此构建脚本。
+部署中断后，可设置 `BOXLITE_BOX_ID` 再次运行部署脚本，在已有 Box 中继续初始化而不重复创建。
 
 ## 镜像交付
 

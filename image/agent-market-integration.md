@@ -29,7 +29,7 @@
 
 `deploy_web_terminal.py` 可创建并初始化新的开发 Box，`update_web_terminal.py` 只对通过 `BOXLITE_BOX_ID` 明确指定的已有 Box 执行 copy_in 和重启，适合镜像尚未构建时快速迭代。它们不是正式交付包，不作为平台部署 API，也不应被原地改成镜像发布脚本。
 
-部署脚本请求 1 CPU、1024 MiB 内存、50 GB 持久磁盘和不设 allowlist 的完整出站网络，并在 Box 内安装 Codex、tmux、UTF-8 locale 与中文字体。更新脚本不会创建 Box 或重新安装这些依赖；使用前应确认 `BOXLITE_BOX_ID`、目标环境和授权。
+部署脚本请求 1 CPU、1024 MiB 内存、10 GB 持久磁盘和不设 allowlist 的完整出站网络，并在 Box 内安装 Codex、tmux、UTF-8 locale 与中文字体。更新脚本不会创建 Box 或重新安装这些依赖；使用前应确认 `BOXLITE_BOX_ID`、目标环境和授权。
 
 ## 当前限制
 

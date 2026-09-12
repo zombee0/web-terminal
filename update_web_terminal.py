@@ -23,9 +23,10 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 pkill -f '^/usr/local/bin/web-terminal$' || true
-install -m 0755 -o root -g root /tmp/web-terminal /usr/local/bin/web-terminal
+install -m 0755 -o root -g root /home/boxlite/.web-terminal-upload /usr/local/bin/web-terminal
+rm -f /home/boxlite/.web-terminal-upload
 su -s /bin/bash boxlite -c \
-  'cd /home/boxlite && HOME=/home/boxlite LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin nohup /usr/local/bin/web-terminal >/tmp/web-terminal.log 2>&1 </dev/null &'
+  'cd /home/boxlite && HOME=/home/boxlite LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin setsid -f /usr/local/bin/web-terminal >/tmp/web-terminal.log 2>&1 </dev/null'
 """
 
 
@@ -48,10 +49,13 @@ def ensure_app():
         raise RuntimeError(f"Build completed without producing: {APP}")
 
 
-def api(method, path):
+def api(method, path, payload=None):
     base = os.environ["BOXLITE_REST_URL"].rstrip("/").removesuffix("/api")
-    request = urllib.request.Request(base + path, method=method)
+    data = None if payload is None else json.dumps(payload).encode()
+    request = urllib.request.Request(base + path, data=data, method=method)
     request.add_header("Authorization", "Bearer " + os.environ["BOXLITE_API_KEY"])
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode() or "{}")
 
@@ -85,13 +89,28 @@ async def run_checked(box, command, *, args=None, user=None, timeout_secs=None):
         )
 
 
+async def ensure_started(runtime, box):
+    info = await runtime.get_info(box.id)
+    if info is not None and info.state.running:
+        return
+    api("POST", f"/api/v1/boxes/{box.id}/start", {})
+    for _ in range(60):
+        info = await runtime.get_info(box.id)
+        if info is not None and info.state.running:
+            return
+        await asyncio.sleep(1)
+    raise RuntimeError(f"Box did not become running: {box.id}")
+
+
 async def main():
     configure_environment()
     box_id = os.environ["BOXLITE_BOX_ID"]
     runtime = Boxlite.rest(BoxliteRestOptions.from_env())
     box = await runtime.get(box_id)
-    await box.start()
-    await box.copy_in(str(APP), "/tmp/web-terminal")
+    if box is None:
+        raise RuntimeError(f"Box not found: {box_id}")
+    await ensure_started(runtime, box)
+    await box.copy_in(str(APP), "/home/boxlite/.web-terminal-upload")
     await run_checked(
         box,
         "sh",

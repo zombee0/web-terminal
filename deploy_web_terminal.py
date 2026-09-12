@@ -38,7 +38,8 @@ apt-get install -y --no-install-recommends \
   locales \
   passwd \
   procps \
-  tmux
+  tmux \
+  util-linux
 
 if ! id -u boxlite >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash boxlite
@@ -69,9 +70,10 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 pkill -f '^/usr/local/bin/web-terminal$' || true
-install -m 0755 -o root -g root /tmp/web-terminal /usr/local/bin/web-terminal
+install -m 0755 -o root -g root /home/boxlite/.web-terminal-upload /usr/local/bin/web-terminal
+rm -f /home/boxlite/.web-terminal-upload
 su -s /bin/bash boxlite -c \
-  'cd /home/boxlite && HOME=/home/boxlite LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin nohup /usr/local/bin/web-terminal >/tmp/web-terminal.log 2>&1 </dev/null &'
+  'cd /home/boxlite && HOME=/home/boxlite LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin setsid -f /usr/local/bin/web-terminal >/tmp/web-terminal.log 2>&1 </dev/null'
 """
 
 
@@ -92,10 +94,13 @@ def ensure_app():
         raise RuntimeError(f"Build completed without producing: {APP}")
 
 
-def api(method, path):
+def api(method, path, payload=None):
     base = os.environ["BOXLITE_REST_URL"].rstrip("/").removesuffix("/api")
-    request = urllib.request.Request(base + path, method=method)
+    data = None if payload is None else json.dumps(payload).encode()
+    request = urllib.request.Request(base + path, data=data, method=method)
     request.add_header("Authorization", "Bearer " + os.environ["BOXLITE_API_KEY"])
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode() or "{}")
 
@@ -137,29 +142,51 @@ def new_box_name():
     return f"web-terminal-{timestamp}-{secrets.token_hex(3)}"
 
 
+async def ensure_started(runtime, box):
+    info = await runtime.get_info(box.id)
+    if info is not None and info.state.running:
+        return
+    api("POST", f"/api/v1/boxes/{box.id}/start", {})
+    for _ in range(60):
+        info = await runtime.get_info(box.id)
+        if info is not None and info.state.running:
+            return
+        await asyncio.sleep(1)
+    raise RuntimeError(f"Box did not become running: {box.id}")
+
+
 async def main():
     configure_environment()
     runtime = Boxlite.rest(BoxliteRestOptions.from_env())
-    box_name = new_box_name()
-    box = await runtime.create(
-        BoxOptions(
-            image=os.environ.get("BOXLITE_IMAGE", DEFAULT_IMAGE),
-            cpus=1,
-            memory_mib=1024,
-            disk_size_gb=50,
-            working_dir="/tmp",
-            network=NetworkSpec(mode="enabled", allow_net=[]),
-            entrypoint=["/bin/sleep"],
-            cmd=["infinity"],
-            user="root",
-            auto_remove=False,
-            detach=True,
-        ),
-        name=box_name,
-    )
+    box_id = os.environ.get("BOXLITE_BOX_ID")
+    if box_id:
+        box = await runtime.get(box_id)
+        if box is None:
+            raise RuntimeError(f"Box not found: {box_id}")
+        info = await runtime.get_info(box_id)
+        box_name = info.name if info is not None else box_id
+        print(f"Resuming deployment in existing Box: {box_id}", flush=True)
+    else:
+        box_name = new_box_name()
+        box = await runtime.create(
+            BoxOptions(
+                image=os.environ.get("BOXLITE_IMAGE", DEFAULT_IMAGE),
+                cpus=1,
+                memory_mib=1024,
+                disk_size_gb=10,
+                working_dir="/tmp",
+                network=NetworkSpec(mode="enabled", allow_net=[]),
+                entrypoint=["/bin/sleep"],
+                cmd=["infinity"],
+                user="root",
+                auto_remove=False,
+                detach=True,
+            ),
+            name=box_name,
+        )
     print(f"BOX_ID={box.id}", flush=True)
 
-    await box.start()
+    await ensure_started(runtime, box)
     await run_checked(
         box,
         "sh",
@@ -167,7 +194,7 @@ async def main():
         user="root",
         timeout_secs=900,
     )
-    await box.copy_in(str(APP), "/tmp/web-terminal")
+    await box.copy_in(str(APP), "/home/boxlite/.web-terminal-upload")
     await run_checked(
         box,
         "sh",
