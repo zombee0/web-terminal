@@ -17,11 +17,11 @@ bash web_terminal/build_web_terminal_image.sh
 
 从 workspace 根目录调用上述脚本即可；脚本也支持其他工作目录下的绝对路径调用。源码以多阶段方式编译，最终镜像从 `python:slim` 安装 Bash、Codex、tmux、locale 和字体，不依赖旧 Box 已安装的软件。它以 `boxlite` 用户运行，默认 ENTRYPOINT 启动 3001 前台服务。
 
-原有 `deploy_web_terminal.py`、`update_web_terminal.py` 和 `web-terminal-linux-amd64` 保留；此构建不会覆盖旧二进制。
+`deploy_web_terminal.py` 和 `update_web_terminal.py` 使用 `build/web-terminal-linux-amd64`；运行 `build_web_terminal_binary.sh` 可单独生成该文件。`build/` 不受 Git 跟踪，Docker 镜像构建也不会覆盖本地产物。
 
 ### 可复现性的准确边界
 
-`python:slim` 是 Docker Official Image，也是 BoxLite CodeBox 的默认 image，不是 BoxLite 专有发行版。现有部署脚本只对已有 Box 执行 get/copy_in/exec，无法由此证明该 Box 当初使用的镜像。参见 [BoxLite Python SDK](https://github.com/boxlite-ai/boxlite/blob/main/docs/reference/python/README.md)。
+`python:slim` 是 Docker Official Image，也是 BoxLite CodeBox 的默认 image，不是 BoxLite 专有发行版。开发部署脚本从 BoxLite 的 `python` image 创建 Box，再在运行时安装依赖；这条路径不同于 Dockerfile 的完整镜像构建，不能作为镜像可复现性的证据。参见 [BoxLite Python SDK](https://github.com/boxlite-ai/boxlite/blob/main/docs/reference/python/README.md)。
 
 开发默认使用滚动基础镜像和官方 Codex 安装器。因此“按已发布 digest 运行同一环境”成立，“从源码重新构建逐字节相同镜像”尚不成立。发布记录应保存：
 

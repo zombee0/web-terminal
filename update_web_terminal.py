@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import urllib.request
 
@@ -12,7 +13,8 @@ from boxlite import Boxlite, BoxliteRestOptions
 
 DEFAULT_REST_URL = "https://dev.boxlite.ai/api"
 PORT = 3001
-APP = pathlib.Path(__file__).parent / "web-terminal-linux-amd64"
+APP = pathlib.Path(__file__).parent / "build" / "web-terminal-linux-amd64"
+BUILD_SCRIPT = pathlib.Path(__file__).parent / "build_web_terminal_binary.sh"
 
 UPDATE_COMMAND = r"""
 set -eu
@@ -34,8 +36,16 @@ def configure_environment():
         raise RuntimeError("BOXLITE_API_KEY is not set")
     if not os.environ.get("BOXLITE_BOX_ID"):
         raise RuntimeError("BOXLITE_BOX_ID is not set")
+    ensure_app()
+
+
+def ensure_app():
+    if APP.is_file():
+        return
+    print(f"Web Terminal binary not found; building {APP}", flush=True)
+    subprocess.run(["bash", str(BUILD_SCRIPT)], cwd=BUILD_SCRIPT.parent, check=True)
     if not APP.is_file():
-        raise RuntimeError(f"Web Terminal binary not found: {APP}")
+        raise RuntimeError(f"Build completed without producing: {APP}")
 
 
 def api(method, path):
