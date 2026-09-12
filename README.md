@@ -1,17 +1,35 @@
 # web-terminal
 
-浏览器 Web Terminal 服务及其 BoxLite 部署工具。
+A browser-based terminal service and BoxLite deployment toolkit.
 
-## 构建部署二进制
+## Build the Deployment Binary
 
 ```bash
 bash build_web_terminal_binary.sh
 ```
 
-Linux AMD64 二进制输出到 `build/web-terminal-linux-amd64`。`build/` 是本地编译产物目录，不受 Git 跟踪。
-部署和更新脚本在该二进制不存在时会自动执行此构建脚本。
-部署中断后，可设置 `BOXLITE_BOX_ID` 再次运行部署脚本，在已有 Box 中继续初始化而不重复创建。
+The Linux AMD64 binary is written to `build/web-terminal-linux-amd64`. The
+`build/` directory contains local build artifacts and is ignored by Git. The
+deployment and update scripts invoke the build script automatically when the
+binary is missing.
 
-## 镜像交付
+If deployment is interrupted, set `BOXLITE_BOX_ID` and run the deployment
+script again to continue provisioning the existing Box instead of creating a
+new one.
 
-Dockerfile、镜像构建/测试/推送脚本、GHCR 发布说明和 agent.market manifest 统一位于 [`image/`](./image/README.md)。
+## Network Exposure
+
+The custom Web Terminal listens on port `3001`. It is the only terminal port
+that may be published by this project. Port `22222` must remain internal and
+must not be exposed through public ingress, preview URLs, container port
+publishing, or service manifests.
+
+## Container Image Delivery
+
+The Dockerfile, image build/test/push scripts, GHCR publishing guide, and
+agent.market manifest are grouped under [`image/`](./image/README.md).
+
+> **Validation status:** The container image build, runtime, registry push, and
+> BoxLite image deployment workflows have not been validated end to end. Treat
+> the image documentation and scripts as provisional until that validation is
+> completed.

@@ -1,13 +1,22 @@
-# Web Terminal 镜像交付
+# Web Terminal Image Delivery
 
-本目录集中管理 Web Terminal 的完整镜像交付内容：
+This directory groups the complete container-image delivery surface:
 
-- `Dockerfile` 与 `Dockerfile.dockerignore`：镜像定义和构建上下文过滤规则；
-- `build_web_terminal_image.sh`：构建本地 Linux AMD64 镜像；
-- `test_web_terminal_image.sh`：执行本地镜像 smoke test；
-- `push_web_terminal_image.sh`：测试、标记并推送镜像到 GHCR；
-- `agent.market.yaml`：agent.market service manifest；
-- `ghcr-publish.md`：完整构建和发布流程；
-- `agent-market-integration.md`：镜像与平台的职责边界。
+- `Dockerfile` and `Dockerfile.dockerignore`: image definition and build-context filters
+- `build_web_terminal_image.sh`: local Linux AMD64 image build
+- `test_web_terminal_image.sh`: local image smoke-test helper
+- `push_web_terminal_image.sh`: test, tag, and GHCR push helper
+- `agent.market.yaml`: agent.market service manifest
+- `ghcr-publish.md`: build and publishing procedure
+- `agent-market-integration.md`: builder/platform responsibility boundary
 
-所有命令均可从项目根目录执行，具体步骤见 `ghcr-publish.md`。
+Run the documented commands from the repository root unless a command states
+otherwise.
+
+> **Unverified workflow:** The real image build, container runtime, registry
+> push, and BoxLite image deployment paths have not been validated end to end.
+> The scripts and commands in this directory are provisional and must not be
+> represented as production-ready until clean-environment validation succeeds.
+
+The image and manifest expose only port `3001`. Port `22222` must not be
+published or added to any external ingress configuration.
