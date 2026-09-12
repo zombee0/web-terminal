@@ -190,6 +190,7 @@ async def main():
                 cmd=["infinity"],
                 user="root",
                 auto_remove=False,
+                auto_stop=0,
                 detach=True,
             ),
             name=box_name,

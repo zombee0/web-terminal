@@ -21,6 +21,9 @@ After deployment succeeds, the script prints an authenticated preview URL with
 `BOXLITE_BOX_AUTH_KEY` in its query string. Treat the complete URL as a secret:
 do not commit it, publish it, or include it in ordinary logs.
 
+New Boxes are created with automatic stopping disabled and remain running until
+they are stopped explicitly.
+
 ## Network Exposure
 
 The custom Web Terminal listens on port `3001`. It is the only terminal port
