@@ -50,7 +50,8 @@ file protocol.
 
 ## Development Scripts
 
-`deploy_web_terminal.py` creates and provisions a development Box.
+`deploy_web_terminal.py` creates and provisions a development Box on cloud REST
+by default, or in a local embedded BoxLite VM when `BOXLITE_RUNTIME=embedded`.
 `update_web_terminal.py` updates an existing Box selected explicitly through
 `BOXLITE_BOX_ID`. These scripts support rapid source iteration; they are not a
 production marketplace deployment API and do not validate image execution.

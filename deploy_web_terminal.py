@@ -1,24 +1,24 @@
-"""Create and provision a new Web Terminal Box on dev.boxlite.ai."""
+"""Create and provision a Web Terminal Box on cloud REST or local embedded BoxLite."""
 
 import asyncio
-import json
 import os
-import pathlib
 import secrets
-import subprocess
-import sys
-import urllib.parse
-import urllib.request
 from datetime import UTC, datetime
 
-from boxlite import Boxlite, BoxliteRestOptions, BoxOptions, NetworkSpec
+from web_terminal_boxlite import (
+    app_path,
+    box_display_name,
+    create_box_options,
+    create_runtime,
+    ensure_started,
+    prepare_runtime_env,
+    run_checked,
+    runtime_mode,
+    service_url,
+    wait_for_guest_health,
+    wait_for_host_health,
+)
 
-
-DEFAULT_REST_URL = "https://dev.boxlite.ai/api"
-DEFAULT_IMAGE = "python"
-PORT = 3001
-APP = pathlib.Path(__file__).parent / "build" / "web-terminal-linux-amd64"
-BUILD_SCRIPT = pathlib.Path(__file__).parent / "build_web_terminal_binary.sh"
 
 BOOTSTRAP_COMMAND = r"""
 set -eu
@@ -78,72 +78,6 @@ su -s /bin/bash boxlite -c \
 """
 
 
-def configure_environment():
-    if not os.environ.get("BOXLITE_REST_URL"):
-        os.environ["BOXLITE_REST_URL"] = DEFAULT_REST_URL
-    if not os.environ.get("BOXLITE_API_KEY"):
-        raise RuntimeError("BOXLITE_API_KEY is not set")
-    ensure_app()
-
-
-def ensure_app():
-    if APP.is_file():
-        return
-    print(f"Web Terminal binary not found; building {APP}", flush=True)
-    subprocess.run(["bash", str(BUILD_SCRIPT)], cwd=BUILD_SCRIPT.parent, check=True)
-    if not APP.is_file():
-        raise RuntimeError(f"Build completed without producing: {APP}")
-
-
-def api(method, path, payload=None):
-    base = os.environ["BOXLITE_REST_URL"].rstrip("/").removesuffix("/api")
-    data = None if payload is None else json.dumps(payload).encode()
-    request = urllib.request.Request(base + path, data=data, method=method)
-    request.add_header("Authorization", "Bearer " + os.environ["BOXLITE_API_KEY"])
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode() or "{}")
-
-
-def authenticated_preview_url(preview):
-    parts = urllib.parse.urlsplit(preview["url"])
-    query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
-    query.append(("BOXLITE_BOX_AUTH_KEY", preview["token"]))
-    return urllib.parse.urlunsplit(
-        parts._replace(path=parts.path or "/", query=urllib.parse.urlencode(query))
-    )
-
-
-async def drain(stream, destination, captured):
-    async for chunk in stream:
-        text = str(chunk)
-        captured.append(text)
-        destination.write(text)
-        destination.flush()
-
-
-async def run_checked(box, command, *, args=None, user=None, timeout_secs=None):
-    execution = await box.exec(
-        command,
-        args=args,
-        user=user,
-        timeout_secs=timeout_secs,
-    )
-    stdout = []
-    stderr = []
-    result, _, _ = await asyncio.gather(
-        execution.wait(),
-        drain(execution.stdout(), sys.stdout, stdout),
-        drain(execution.stderr(), sys.stderr, stderr),
-    )
-    if result.exit_code != 0:
-        detail = "".join(stderr)[-4000:].strip()
-        raise RuntimeError(
-            f"Command failed with exit code {result.exit_code}: {command}\n{detail}"
-        )
-
-
 def new_box_name():
     configured = os.environ.get("BOXLITE_BOX_NAME")
     if configured:
@@ -152,52 +86,25 @@ def new_box_name():
     return f"web-terminal-{timestamp}-{secrets.token_hex(3)}"
 
 
-async def ensure_started(runtime, box):
-    info = await runtime.get_info(box.id)
-    if info is not None and info.state.running:
-        return
-    api("POST", f"/api/v1/boxes/{box.id}/start", {})
-    for _ in range(60):
-        info = await runtime.get_info(box.id)
-        if info is not None and info.state.running:
-            return
-        await asyncio.sleep(1)
-    raise RuntimeError(f"Box did not become running: {box.id}")
-
-
 async def main():
-    configure_environment()
-    runtime = Boxlite.rest(BoxliteRestOptions.from_env())
+    mode = runtime_mode()
+    prepare_runtime_env(mode)
+    runtime = create_runtime(mode)
     box_id = os.environ.get("BOXLITE_BOX_ID")
     if box_id:
         box = await runtime.get(box_id)
         if box is None:
             raise RuntimeError(f"Box not found: {box_id}")
         info = await runtime.get_info(box_id)
-        box_name = info.name if info is not None else box_id
+        box_name = box_display_name(info, box_id)
         print(f"Resuming deployment in existing Box: {box_id}", flush=True)
     else:
         box_name = new_box_name()
-        box = await runtime.create(
-            BoxOptions(
-                image=os.environ.get("BOXLITE_IMAGE", DEFAULT_IMAGE),
-                cpus=1,
-                memory_mib=1024,
-                disk_size_gb=10,
-                working_dir="/tmp",
-                network=NetworkSpec(mode="enabled", allow_net=[]),
-                entrypoint=["/bin/sleep"],
-                cmd=["infinity"],
-                user="root",
-                auto_remove=False,
-                auto_stop=0,
-                detach=True,
-            ),
-            name=box_name,
-        )
+        box = await runtime.create(create_box_options(mode), name=box_name)
+    print(f"RUNTIME={mode}", flush=True)
     print(f"BOX_ID={box.id}", flush=True)
 
-    await ensure_started(runtime, box)
+    await ensure_started(runtime, box, mode)
     await run_checked(
         box,
         "sh",
@@ -205,7 +112,7 @@ async def main():
         user="root",
         timeout_secs=900,
     )
-    await box.copy_in(str(APP), "/home/boxlite/.web-terminal-upload")
+    await box.copy_in(str(app_path(mode)), "/home/boxlite/.web-terminal-upload")
     await run_checked(
         box,
         "sh",
@@ -213,24 +120,13 @@ async def main():
         user="root",
         timeout_secs=60,
     )
-    await run_checked(
-        box,
-        "sh",
-        args=[
-            "-lc",
-            "for attempt in $(seq 1 60); do "
-            "curl -fsS http://127.0.0.1:3001/healthz | grep -qx ok && exit 0; "
-            "sleep 1; done; cat /tmp/web-terminal.log >&2; exit 1",
-        ],
-        user="root",
-        timeout_secs=90,
-    )
-
-    preview = api("GET", f"/api/box/{box.id}/ports/{PORT}/preview-url")
-    url = authenticated_preview_url(preview)
+    await wait_for_guest_health(box, attempts=60, timeout_secs=90)
+    url = service_url(mode, box, authenticated=True)
+    if mode == "embedded":
+        await wait_for_host_health(url.rstrip("/") + "/healthz")
     print(f"BOX_NAME={box_name}")
     print(f"URL={url}")
-    print(f"To update this Box: BOXLITE_BOX_ID={box.id} python3 update_web_terminal.py")
+    print(f"To update this Box: BOXLITE_RUNTIME={mode} BOXLITE_BOX_ID={box.id} python3 update_web_terminal.py")
 
 
 if __name__ == "__main__":

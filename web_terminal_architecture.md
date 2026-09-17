@@ -75,14 +75,22 @@ source code, URLs committed to Git, or ordinary logs.
 ## Box Orchestration Boundary
 
 BoxLite API or SDK calls belong in a trusted deployment backend, not inside an
-untrusted terminal session. The backend is responsible for:
+untrusted terminal session. The development scripts support two backends:
+
+- Cloud REST (default): `Boxlite.rest(...)` against `dev.boxlite.ai`
+- Local embedded: `Boxlite.default()`, with guest port `3001` forwarded to
+  `127.0.0.1`
+
+Select the backend with `BOXLITE_RUNTIME=cloud` or `BOXLITE_RUNTIME=embedded`.
+The backend is responsible for:
 
 - Creating, starting, stopping, and deleting Boxes
 - Applying CPU, memory, disk, and network policy
 - Injecting only the required configuration
 - Starting the service exactly once
 - Performing readiness checks on `/healthz`
-- Issuing authenticated preview access for port `3001`
+- Issuing authenticated preview access for port `3001` on cloud, or loopback
+  port forwarding on the local embedded runtime
 - Enforcing timeouts and cleanup
 
 The deployment scripts in this repository are development tools. They are not

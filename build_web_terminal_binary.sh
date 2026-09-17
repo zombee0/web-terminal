@@ -3,14 +3,16 @@ set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 output_dir="${project_dir}/build"
-output="${output_dir}/web-terminal-linux-amd64"
+goos="${GOOS:-linux}"
+goarch="${GOARCH:-amd64}"
+output="${output_dir}/web-terminal-${goos}-${goarch}"
 
 command -v go >/dev/null
 mkdir -p "$output_dir"
 
 (
   cd "$project_dir"
-  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
     go build -trimpath -ldflags="-s -w" -o "$output" .
 )
 
