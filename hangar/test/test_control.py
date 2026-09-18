@@ -7,8 +7,8 @@ from pathlib import Path
 from unittest import mock
 from urllib.request import Request, urlopen
 
-from webterminal import boxlite as wt
-from webterminal import control
+from hangar import boxlite as wt
+from hangar import control
 
 
 class FakeState:
@@ -102,7 +102,7 @@ class ControlServiceTest(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.state_path = Path(self.tmpdir.name) / "state.json"
         self.runner = FakeRunner()
-        self.cloud_patch = mock.patch("webterminal.control.cloud_ready", return_value=True)
+        self.cloud_patch = mock.patch("hangar.control.cloud_ready", return_value=True)
         self.cloud_patch.start()
         self.service = control.ControlService(self.state_path, runner=self.runner)
 
@@ -205,7 +205,7 @@ class ControlHttpTest(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.runner = FakeRunner()
-        self.cloud_patch = mock.patch("webterminal.control.cloud_ready", return_value=True)
+        self.cloud_patch = mock.patch("hangar.control.cloud_ready", return_value=True)
         self.cloud_patch.start()
         self.service = control.ControlService(
             Path(self.tmpdir.name) / "state.json", runner=self.runner

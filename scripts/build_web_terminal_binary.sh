@@ -11,9 +11,9 @@ command -v go >/dev/null
 mkdir -p "$output_dir"
 
 (
-  cd "$project_dir"
+  cd "$project_dir/go"
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-    go build -trimpath -ldflags="-s -w" -o "$output" ./cmd/web-terminal
+    go build -trimpath -ldflags="-s -w" -o "$output" .
 )
 
 echo "Built ${output}"

@@ -5,14 +5,14 @@ ARG BASE_IMAGE=python:slim
 ARG GO_IMAGE=golang:1.26.5-bookworm
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS builder
 WORKDIR /src
-COPY go.mod go.sum ./
+COPY go/go.mod go/go.sum ./
 RUN go mod download
-COPY cmd/web-terminal ./cmd/web-terminal
+COPY go/ ./
 RUN go test ./...
 ARG TARGETOS
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /out/web-terminal ./cmd/web-terminal
+    go build -trimpath -ldflags="-s -w" -o /out/web-terminal .
 
 FROM ${BASE_IMAGE}
 

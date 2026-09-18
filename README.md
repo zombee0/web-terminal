@@ -16,11 +16,12 @@ packages. Use the `PYTHON=` path it prints for later commands.
 
 | Path | Role |
 |---|---|
-| `cmd/web-terminal/` | Guest Go service (`/`, `/ws`, `/healthz`) |
-| `webterminal/` | Hangar control plane and BoxLite provision/update |
+| `go/` | Guest Go service and module (`/`, `/ws`, `/healthz`) |
+| `go/terminal/test/` | Guest Go unit tests |
+| `hangar/` | Hangar control plane and BoxLite provision/update |
+| `hangar/test/` | Hangar unit tests |
 | `scripts/` | Host bootstrap, Linux binary build, e2e check |
 | `docs/` | Architecture notes |
-| `tests/` | Host-side unit tests |
 | `image/` | Provisional OCI image path (not required for script deploy) |
 
 Build artifacts land in `build/` and are gitignored.
@@ -32,7 +33,7 @@ Host-only console for create / stop / resume / delete. It binds
 inside a terminal session.
 
 ```bash
-python3 -m webterminal.control
+python3 -m hangar.control
 ```
 
 Open `http://127.0.0.1:3100`. Choose **LOCAL** or **CLOUD**, then provision a
@@ -48,7 +49,7 @@ Cloud REST on `app.boxlite.ai` is the default:
 
 ```bash
 export BOXLITE_API_KEY=...
-python3 -m webterminal.deploy
+python3 -m hangar.deploy
 ```
 
 Local embedded BoxLite uses `Boxlite.default()`, forwards guest port `3001`
@@ -56,7 +57,7 @@ to `127.0.0.1`, and does not need a cloud API key:
 
 ```bash
 export BOXLITE_RUNTIME=embedded
-python3 -m webterminal.deploy
+python3 -m hangar.deploy
 ```
 
 Embedded needs Python 3.10+ with `boxlite`, plus Apple Silicon or Linux with
@@ -70,7 +71,7 @@ tmux, Codex, Claude Code, and Cursor CLI in the guest, and starts
 Update an existing box with the same runtime:
 
 ```bash
-BOXLITE_RUNTIME=embedded BOXLITE_BOX_ID=... python3 -m webterminal.update
+BOXLITE_RUNTIME=embedded BOXLITE_BOX_ID=... python3 -m hangar.update
 ```
 
 After cloud deploy, the script prints an authenticated preview URL. Do not

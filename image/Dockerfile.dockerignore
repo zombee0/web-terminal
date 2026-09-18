@@ -1,5 +1,6 @@
 **
-!go.mod
-!go.sum
-!cmd/web-terminal/main.go
-!cmd/web-terminal/main_test.go
+!go/go.mod
+!go/go.sum
+!go/main.go
+!go/terminal/terminal.go
+!go/terminal/test/terminal_test.go

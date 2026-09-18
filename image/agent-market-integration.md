@@ -50,9 +50,9 @@ file protocol.
 
 ## Development Scripts
 
-`python3 -m webterminal.deploy` creates and provisions a development Box on cloud REST
+`python3 -m hangar.deploy` creates and provisions a development Box on cloud REST
 by default, or in a local embedded BoxLite VM when `BOXLITE_RUNTIME=embedded`.
-`python3 -m webterminal.update` updates an existing Box selected explicitly through
+`python3 -m hangar.update` updates an existing Box selected explicitly through
 `BOXLITE_BOX_ID`. These scripts support rapid source iteration; they are not a
 production marketplace deployment API and do not validate image execution.
 

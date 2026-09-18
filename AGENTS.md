@@ -104,7 +104,7 @@ fonts + agent CLIs). Wait for it. Bootstrap timeout is 900 seconds.
 
 ```bash
 # PYTHON is the interpreter printed by scripts/bootstrap_host.sh
-"$PYTHON" -m webterminal.deploy
+"$PYTHON" -m hangar.deploy
 ```
 
 Success prints `RUNTIME=`, `BOX_ID=`, `BOX_NAME=`, and `URL=`. Keep `BOX_ID`
@@ -116,7 +116,7 @@ command. Do not create a second Box unless the user wants a new one.
 Update binary only (no apt/CLI reinstall):
 
 ```bash
-BOXLITE_BOX_ID=<id> "$PYTHON" -m webterminal.update
+BOXLITE_BOX_ID=<id> "$PYTHON" -m hangar.update
 ```
 
 Use the same `BOXLITE_RUNTIME` as the original deploy.
@@ -124,7 +124,7 @@ Use the same `BOXLITE_RUNTIME` as the original deploy.
 Host control console (lifecycle UI, still on the host):
 
 ```bash
-"$PYTHON" -m webterminal.control
+"$PYTHON" -m hangar.control
 ```
 
 Default URL is `http://127.0.0.1:3100`. Do not expose this process. Cloud
@@ -153,17 +153,18 @@ If `websockets` is missing, rerun `bash scripts/bootstrap_host.sh`.
 | Path | Role |
 |---|---|
 | `scripts/bootstrap_host.sh` | Host SDK/toolchain install |
-| `webterminal/control.py` | Hangar control plane (create/stop/resume/delete) |
-| `webterminal/control.html` | Geek-style control console UI |
-| `webterminal/deploy.py` | Create/provision Box |
-| `webterminal/update.py` | Replace guest binary |
-| `webterminal/provision.py` | Guest bootstrap + app install/start |
-| `webterminal/boxlite.py` | Cloud vs embedded helper |
+| `hangar/control.py` | Hangar control plane (create/stop/resume/delete) |
+| `hangar/control.html` | Geek-style control console UI |
+| `hangar/deploy.py` | Create/provision Box |
+| `hangar/update.py` | Replace guest binary |
+| `hangar/provision.py` | Guest bootstrap + app install/start |
+| `hangar/boxlite.py` | Cloud vs embedded helper |
+| `hangar/test/` | Hangar unit tests |
 | `scripts/build_web_terminal_binary.sh` | Cross-compile Linux guest binary |
 | `scripts/e2e_web_terminal.py` | HTTP + WebSocket PTY check |
-| `cmd/web-terminal/` | Guest service (`:3001`, `/`, `/ws`, `/healthz`) |
+| `go/` | Guest service and module (`:3001`, `/`, `/ws`, `/healthz`) |
+| `go/terminal/test/` | Guest Go unit tests |
 | `docs/` | Architecture and design notes |
-| `tests/` | Host-side unit tests |
 | `image/` | OCI image path (provisional; not required for script deploy) |
 
 Guest binary names:

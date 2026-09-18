@@ -17,7 +17,7 @@ authenticate agent CLIs inside the box after it starts.
 ## Exposure rules
 
 - Publish only guest port `3001`. Never expose `22222`.
-- Hangar (`python3 -m webterminal.control`) binds `127.0.0.1:3100` by default. Do
+- Hangar (`python3 -m hangar.control`) binds `127.0.0.1:3100` by default. Do
   not publish the control plane.
 - The Go service has no end-user auth. Put an authenticated proxy in front
   of HTTP and WebSocket on cloud deployments.
