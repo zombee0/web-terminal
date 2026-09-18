@@ -29,6 +29,25 @@ a secret: do not commit it, publish it, or include it in ordinary logs.
 New Boxes are created with automatic stopping disabled and remain running until
 they are stopped explicitly.
 
+## Control Console
+
+A host-side geek console can create, stop, resume, and delete Boxes on either
+runtime. It binds `127.0.0.1:3100` by default and must stay on the host —
+BoxLite SDK calls never run inside a terminal session.
+
+```bash
+python3 control_web_terminal.py
+```
+
+Open `http://127.0.0.1:3100`. Choose **CLOUD** or **LOCAL**, then provision a
+Box. Each row has its own access link. Cloud links include
+`BOXLITE_BOX_AUTH_KEY` in the query string; treat the complete URL as a secret.
+Local links are loopback URLs on an allocated host port.
+
+Override bind address with `WEB_TERMINAL_CONTROL_HOST` /
+`WEB_TERMINAL_CONTROL_PORT`. Inventory is stored in
+`~/.web-terminal/control-state.json`.
+
 ## Deploy
 
 Cloud REST on `dev.boxlite.ai` is the default:

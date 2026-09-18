@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HANGAR // web-terminal</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23020508'/%3E%3Cpath d='M7 8h6v4H7zm12 0h6v4h-6zM7 20h18v4H7z' fill='%233dff9a'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #020508;
+      --panel: rgba(6, 16, 18, 0.86);
+      --panel-solid: #071016;
+      --line: #163028;
+      --green: #3dff9a;
+      --green-dim: #147a48;
+      --amber: #ffb020;
+      --red: #ff4d6d;
+      --cyan: #5ce1e6;
+      --text: #d5f6e2;
+      --muted: #6b8a78;
+      --shadow: 0 0 40px rgba(61, 255, 154, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(61, 255, 154, 0.08), transparent 50%),
+        radial-gradient(900px 500px at 110% 10%, rgba(92, 225, 230, 0.06), transparent 45%),
+        var(--bg);
+      color: var(--text);
+      font: 13px/1.5 "IBM Plex Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(61, 255, 154, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(61, 255, 154, 0.035) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: radial-gradient(circle at 50% 20%, #000 40%, transparent 85%);
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0 2px,
+        rgba(0, 0, 0, 0.12) 3px
+      );
+      opacity: 0.28;
+    }
+    .wrap {
+      position: relative;
+      z-index: 1;
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 28px 22px 40px;
+    }
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: end;
+      margin-bottom: 22px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 16px;
+    }
+    .brand {
+      font-family: "Share Tech Mono", "IBM Plex Mono", monospace;
+      letter-spacing: 0.08em;
+    }
+    .brand-title {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 12px 16px;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 400;
+      color: var(--green);
+      text-shadow: 0 0 18px rgba(61, 255, 154, 0.35);
+    }
+    .brand h1 span { color: var(--cyan); }
+    .brand .credit {
+      margin: 0;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .brand .credit a {
+      color: var(--cyan);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(92, 225, 230, 0.45);
+    }
+    .brand .credit a:hover { border-bottom-color: var(--cyan); }
+    .brand .sub {
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    .cursor {
+      display: inline-block;
+      width: 0.7ch;
+      height: 1.05em;
+      background: var(--green);
+      margin-left: 4px;
+      animation: blink 1.1s steps(1) infinite;
+      vertical-align: -2px;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    .sys {
+      text-align: right;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .sys b { color: var(--text); font-weight: 500; }
+    .ok { color: var(--green); }
+    .warn { color: var(--amber); }
+    .bad { color: var(--red); }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(8px);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 960px) {
+      header, .grid { grid-template-columns: 1fr; }
+      .sys { text-align: left; }
+    }
+    .panel h2 {
+      margin: 0;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      color: var(--cyan);
+      font-weight: 500;
+    }
+    .pad { padding: 14px; }
+    .runtime {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .runtime button, .actions button, .row-actions button, .ghost {
+      font: inherit;
+      color: var(--text);
+      background: #06140f;
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      cursor: pointer;
+      letter-spacing: 0.08em;
+    }
+    .runtime button.active {
+      border-color: var(--green);
+      color: var(--green);
+      box-shadow: inset 0 0 16px rgba(61, 255, 154, 0.12);
+    }
+    label {
+      display: block;
+      color: var(--muted);
+      margin: 12px 0 6px;
+      letter-spacing: 0.1em;
+      font-size: 11px;
+    }
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      font: inherit;
+      color: var(--text);
+      background: #03090c;
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      outline: none;
+    }
+    input[type="text"]:focus, input[type="number"]:focus { border-color: var(--green); }
+    .resources {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .resources label { margin-top: 8px; }
+    .hint { color: var(--muted); font-size: 11px; margin: 8px 0 14px; }
+    #target-hint {
+      height: 3.3em;
+      overflow: hidden;
+      white-space: pre-line;
+    }
+    .actions { display: flex; gap: 8px; }
+    .actions button.primary, .row-actions button.primary {
+      border-color: var(--green);
+      color: #03140c;
+      background: var(--green);
+      font-weight: 600;
+    }
+    .actions button.danger, .row-actions button.danger {
+      border-color: var(--red);
+      color: var(--red);
+    }
+    .actions button:disabled, .row-actions button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .state {
+      display: inline-block;
+      min-width: 86px;
+      padding: 2px 6px;
+      border: 1px solid currentColor;
+      letter-spacing: 0.08em;
+      font-size: 11px;
+    }
+    .state.running { color: var(--green); }
+    .state.stopped, .state.stopping, .state.starting { color: var(--amber); }
+    .state.missing, .state.error, .state.failed, .state.unknown { color: var(--red); }
+    table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid #10241c;
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      font-weight: 500;
+    }
+    .col-box { width: 24%; }
+    .col-state { width: 132px; padding-right: 28px; }
+    .col-access { width: auto; padding-left: 8px; padding-right: 24px; }
+    .col-ops { width: 318px; text-align: right; }
+    .access { min-height: 2.9em; }
+    .access-main {
+      color: var(--cyan);
+      font-size: 12px;
+      line-height: 1.4;
+      word-break: break-all;
+    }
+    .access-meta {
+      color: var(--amber);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      margin-top: 4px;
+    }
+    th.col-ops, td.col-ops { text-align: right; }
+    td.col-ops { overflow: hidden; }
+    .row-actions {
+      display: flex;
+      flex-wrap: nowrap;
+      justify-content: flex-end;
+      gap: 5px;
+    }
+    .row-actions button, .ghost {
+      padding: 5px 7px;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+    }
+    #fleet { min-height: 168px; }
+    .empty {
+      padding: 28px 14px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .muted { color: var(--muted); }
+    .console {
+      min-height: 220px;
+      max-height: 320px;
+      overflow: auto;
+      background: #03080b;
+      color: #8cffc2;
+      padding: 12px 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .console:empty::before { content: "// awaiting job output"; color: var(--muted); }
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      background: #071016;
+      border: 1px solid var(--green);
+      color: var(--green);
+      padding: 10px 14px;
+      z-index: 5;
+      display: none;
+    }
+    .modal-back {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.62);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 6;
+    }
+    .modal {
+      width: min(460px, calc(100% - 32px));
+      background: var(--panel-solid);
+      border: 1px solid var(--red);
+      padding: 18px;
+    }
+    .modal p { color: var(--muted); }
+    footer {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="brand-title">
+          <h1>HANGAR <span>//</span> WEB-TERMINAL<span class="cursor"></span></h1>
+          <div class="credit">based on <a href="https://github.com/boxlite-ai/boxlite" target="_blank" rel="noopener noreferrer">BoxLite</a></div>
+        </div>
+        <div class="sub">SANDBOX CONTROL PLANE · CREATE / STOP / RESUME / DELETE</div>
+      </div>
+      <div class="sys">
+        <div>CLK <b id="clock">--:--:--</b></div>
+        <div>LOCAL <b class="ok">READY</b></div>
+        <div>CLOUD <b id="cloud-status">...</b></div>
+        <div>FLEET <b id="fleet-count">0</b></div>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>01  DEPLOY TARGET</h2>
+        <div class="pad">
+          <div class="runtime">
+            <button type="button" id="btn-local" class="active" data-runtime="embedded">LOCAL</button>
+            <button type="button" id="btn-cloud" data-runtime="cloud">CLOUD</button>
+          </div>
+          <label for="box-name">BOX NAME</label>
+          <input id="box-name" type="text" placeholder="web-terminal-YYYYMMDD-xxxxxx" autocomplete="off" spellcheck="false">
+          <div class="resources">
+            <div>
+              <label for="res-cpus">CPU</label>
+              <input id="res-cpus" type="number" min="1" max="16" step="1" value="1">
+            </div>
+            <div>
+              <label for="res-memory">MEMORY MiB</label>
+              <input id="res-memory" type="number" min="256" max="32768" step="256" value="1024">
+            </div>
+            <div>
+              <label for="res-disk">DISK GB</label>
+              <input id="res-disk" type="number" min="1" max="200" step="1" value="10">
+            </div>
+          </div>
+          <div class="hint" id="target-hint">Access uses a loopback URL on an allocated port.
+First provision can take 10-15 minutes.</div>
+          <div class="actions">
+            <button type="button" class="primary" id="btn-create">▸ PROVISION</button>
+            <button type="button" id="btn-refresh">REFRESH</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>02  CONSOLE</h2>
+        <pre class="console" id="console"></pre>
+      </section>
+    </div>
+
+    <section class="panel">
+      <h2>03  FLEET</h2>
+      <div id="fleet"></div>
+    </section>
+
+    <footer>BOUND 127.0.0.1 · BOXLITE SDK STAYS ON THE HOST · PREVIEW URLS ARE OPERATOR SECRETS · DO NOT EXPOSE THIS CONSOLE</footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <div class="modal-back" id="modal">
+    <div class="modal">
+      <h2 style="margin-top:0;color:#ff4d6d;letter-spacing:.12em;font-size:13px;">DESTROY BOX</h2>
+      <p id="modal-text">This deletes the Box and drops it from the control inventory.</p>
+      <div class="actions">
+        <button type="button" class="danger" id="modal-yes">YES / DELETE</button>
+        <button type="button" id="modal-no">ABORT</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const state = { runtime: "embedded", jobId: null, pendingDelete: null };
+
+    const $ = (id) => document.getElementById(id);
+    const consoleEl = $("console");
+    const toastEl = $("toast");
+
+    function pad(value) { return String(value).padStart(2, "0"); }
+    function tickClock() {
+      const now = new Date();
+      $("clock").textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    }
+    setInterval(tickClock, 1000);
+    tickClock();
+
+    function toast(message) {
+      toastEl.textContent = message;
+      toastEl.style.display = "block";
+      clearTimeout(toastEl._timer);
+      toastEl._timer = setTimeout(() => { toastEl.style.display = "none"; }, 2200);
+    }
+
+    function log(line) {
+      consoleEl.textContent += line.endsWith("\n") ? line : `${line}\n`;
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[ch]));
+    }
+
+    function readResources() {
+      return {
+        cpus: Number($("res-cpus").value),
+        memory_mib: Number($("res-memory").value),
+        disk_size_gb: Number($("res-disk").value)
+      };
+    }
+
+    function resourceLabel(box) {
+      const parts = [];
+      if (box.cpus) parts.push(`${box.cpus} CPU`);
+      if (box.memory_mib) parts.push(`${box.memory_mib} MiB`);
+      if (box.disk_size_gb) parts.push(`${box.disk_size_gb} GB`);
+      return parts.join(" · ") || "resources unknown";
+    }
+
+    function formatAccess(url) {
+      if (!url) {
+        return `<div class="access"><div class="access-kicker">ACCESS</div><div class="access-main muted">unavailable</div><div class="access-meta">NO ENDPOINT</div></div>`;
+      }
+      let host = url;
+      let meta = "ENDPOINT";
+      try {
+        const parsed = new URL(url);
+        host = parsed.host || parsed.href;
+        if (parsed.searchParams.has("BOXLITE_BOX_AUTH_KEY")) {
+          meta = "AUTHED PREVIEW · TOKEN";
+        } else if (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") {
+          meta = `LOOPBACK · TCP ${parsed.port || "80"}`;
+        } else {
+          meta = parsed.protocol.replace(":", "").toUpperCase();
+        }
+      } catch (error) {
+        meta = "RAW URL";
+      }
+      return `<div class="access" title="${escapeHtml(url)}"><div class="access-main">${escapeHtml(host)}</div><div class="access-meta">${escapeHtml(meta)}</div></div>`;
+    }
+
+    async function api(path, options) {
+      const response = await fetch(path, Object.assign({
+        headers: { "Content-Type": "application/json" }
+      }, options));
+      const text = await response.text();
+      let data = {};
+      if (text) {
+        try { data = JSON.parse(text); } catch { data = { error: text }; }
+      }
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      return data;
+    }
+
+    function setRuntime(runtime) {
+      state.runtime = runtime;
+      $("btn-cloud").classList.toggle("active", runtime === "cloud");
+      $("btn-local").classList.toggle("active", runtime === "embedded");
+      $("target-hint").textContent = runtime === "cloud"
+        ? "Access uses an authed preview URL with a box token.\nFirst provision can take 10-15 minutes."
+        : "Access uses a loopback URL on an allocated port.\nFirst provision can take 10-15 minutes.";
+      refreshBoxes();
+    }
+
+    async function refreshStatus() {
+      try {
+        const data = await api("/api/status");
+        const ready = data.cloud && data.cloud.ready;
+        $("cloud-status").textContent = ready ? "READY" : "NO KEY";
+        $("cloud-status").className = ready ? "ok" : "warn";
+      } catch (error) {
+        $("cloud-status").textContent = "ERROR";
+        $("cloud-status").className = "bad";
+      }
+    }
+
+    function renderBoxes(boxes) {
+      $("fleet-count").textContent = String(boxes.length);
+      const body = boxes.length
+        ? boxes.map((box) => {
+            const busy = box.status === "starting" || box.status === "stopping";
+            return `<tr>
+              <td class="col-box"><code>${escapeHtml(box.id)}</code><div class="hint" style="margin:4px 0 0">${escapeHtml(box.name)}</div><div class="hint" style="margin:2px 0 0">${escapeHtml(resourceLabel(box))}</div></td>
+              <td class="col-state"><span class="state ${escapeHtml(box.status)}">${escapeHtml((box.status || "unknown").toUpperCase())}</span></td>
+              <td class="col-access">${formatAccess(box.url)}</td>
+              <td class="col-ops">
+                <div class="row-actions">
+                  <button data-act="open" data-id="${escapeHtml(box.id)}" ${box.url ? "" : "disabled"}>OPEN</button>
+                  <button data-act="copy" data-id="${escapeHtml(box.id)}" ${box.url ? "" : "disabled"}>COPY</button>
+                  <button data-act="stop" data-id="${escapeHtml(box.id)}" ${box.status === "running" && !busy ? "" : "disabled"}>STOP</button>
+                  <button class="primary" data-act="resume" data-id="${escapeHtml(box.id)}" ${box.status !== "running" && !busy ? "" : "disabled"}>RESUME</button>
+                  <button class="danger" data-act="delete" data-id="${escapeHtml(box.id)}">DELETE</button>
+                </div>
+              </td>
+            </tr>`;
+          }).join("")
+        : `<tr><td colspan="4" class="empty">no boxes on ${state.runtime === "cloud" ? "cloud" : "local"} · provision one from the left rail</td></tr>`;
+      $("fleet").innerHTML = `<table>
+        <thead><tr><th class="col-box">BOX</th><th class="col-state">STATE</th><th class="col-access">ACCESS</th><th class="col-ops">OPS</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>`;
+      $("fleet")._boxes = Object.fromEntries(boxes.map((box) => [box.id, box]));
+    }
+
+    async function refreshBoxes() {
+      try {
+        const data = await api(`/api/boxes?runtime=${encodeURIComponent(state.runtime)}`);
+        renderBoxes(data.boxes || []);
+      } catch (error) {
+        $("fleet").innerHTML = `<div class="empty bad">${escapeHtml(error.message)}</div>`;
+        $("fleet-count").textContent = "0";
+      }
+    }
+
+    async function followJob(jobId) {
+      state.jobId = jobId;
+      log(`// job ${jobId} attached`);
+      const source = new EventSource(`/api/jobs/${jobId}/log`);
+      await new Promise((resolve) => {
+        source.onmessage = (event) => {
+          const payload = JSON.parse(event.data);
+          if (payload.line) log(payload.line.replace(/\n$/, ""));
+        };
+        source.addEventListener("end", (event) => {
+          const job = JSON.parse(event.data);
+          if (job.status === "error") log(`// job failed: ${job.error || "unknown error"}`);
+          else log(`// job ${job.action} complete`);
+          if (job.url) log(`// access ready`);
+          source.close();
+          resolve(job);
+        });
+        source.onerror = () => {
+          source.close();
+          resolve(null);
+        };
+      });
+      state.jobId = null;
+      await refreshBoxes();
+    }
+
+    async function startAction(label, request) {
+      log(`// ${label}`);
+      const data = await request();
+      await followJob(data.job.id);
+    }
+
+    $("btn-cloud").addEventListener("click", () => setRuntime("cloud"));
+    $("btn-local").addEventListener("click", () => setRuntime("embedded"));
+    $("btn-refresh").addEventListener("click", () => { refreshStatus(); refreshBoxes(); });
+    $("btn-create").addEventListener("click", async () => {
+      try {
+        const name = $("box-name").value.trim();
+        await startAction(`provision ${state.runtime}`, () => api("/api/boxes", {
+          method: "POST",
+          body: JSON.stringify(Object.assign({ runtime: state.runtime, name }, readResources()))
+        }));
+      } catch (error) { log(`// error ${error.message}`); }
+    });
+
+    $("fleet").addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-act]");
+      if (!button) return;
+      const box = ($("fleet")._boxes || {})[button.dataset.id];
+      if (!box) return;
+      try {
+        if (button.dataset.act === "open") {
+          window.open(box.url, "_blank", "noopener");
+          return;
+        }
+        if (button.dataset.act === "copy") {
+          await navigator.clipboard.writeText(box.url);
+          toast("ACCESS URL COPIED");
+          return;
+        }
+        if (button.dataset.act === "stop") {
+          await startAction(`stop ${box.id}`, () => api(`/api/boxes/${box.id}/stop`, {
+            method: "POST",
+            body: JSON.stringify({ runtime: box.runtime })
+          }));
+          return;
+        }
+        if (button.dataset.act === "resume") {
+          await startAction(`resume ${box.id}`, () => api(`/api/boxes/${box.id}/resume`, {
+            method: "POST",
+            body: JSON.stringify({ runtime: box.runtime })
+          }));
+          return;
+        }
+        if (button.dataset.act === "delete") {
+          state.pendingDelete = box;
+          $("modal-text").textContent = `Destroy ${box.id} (${box.name}) on ${box.runtime}? This cannot be undone.`;
+          $("modal").style.display = "flex";
+        }
+      } catch (error) { log(`// error ${error.message}`); }
+    });
+
+    $("modal-no").addEventListener("click", () => {
+      state.pendingDelete = null;
+      $("modal").style.display = "none";
+    });
+    $("modal-yes").addEventListener("click", async () => {
+      const box = state.pendingDelete;
+      $("modal").style.display = "none";
+      state.pendingDelete = null;
+      if (!box) return;
+      try {
+        await startAction(`delete ${box.id}`, () => api(`/api/boxes/${box.id}?runtime=${encodeURIComponent(box.runtime)}`, {
+          method: "DELETE"
+        }));
+      } catch (error) { log(`// error ${error.message}`); }
+    });
+
+    (async function init() {
+      await refreshStatus();
+      await refreshBoxes();
+    })();
+    setInterval(refreshBoxes, 8000);
+  </script>
+</body>
+</html>

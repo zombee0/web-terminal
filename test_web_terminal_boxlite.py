@@ -73,6 +73,60 @@ class ServiceUrlTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"BOXLITE_HOST_PORT": "4010"}):
             self.assertEqual(wt.service_url("embedded", object()), "http://127.0.0.1:4010")
 
+    def test_embedded_host_port_override(self):
+        with mock.patch.dict(os.environ, {"BOXLITE_HOST_PORT": "4010"}):
+            self.assertEqual(
+                wt.service_url("embedded", object(), host_port=4015),
+                "http://127.0.0.1:4015",
+            )
+
+
+class SecretRedactionTest(unittest.TestCase):
+    def test_redacts_box_auth_key(self):
+        url = "https://preview.example/?BOXLITE_BOX_AUTH_KEY=super-secret"
+        self.assertEqual(wt.redact_url(url), "https://preview.example/?BOXLITE_BOX_AUTH_KEY=***")
+
+    def test_leaves_local_url_alone(self):
+        self.assertEqual(wt.redact_url("http://127.0.0.1:3001"), "http://127.0.0.1:3001")
+
+
+class PublishedPortTest(unittest.TestCase):
+    def test_reads_network_published_ports(self):
+        info = mock.Mock()
+        info.network.published_ports = [mock.Mock(guest_port=3001, host_port=4015)]
+        self.assertEqual(wt.published_host_port(info), 4015)
+
+    def test_missing_network(self):
+        info = mock.Mock(spec=["id", "name"])
+        self.assertIsNone(wt.published_host_port(info))
+
+
+class PortAllocationTest(unittest.TestCase):
+    def test_skips_used_and_busy_ports(self):
+        with mock.patch.dict(os.environ, {"BOXLITE_HOST_PORT": "3001"}):
+            with mock.patch("web_terminal_boxlite.port_is_free", side_effect=lambda port, host="127.0.0.1": port != 3002):
+                self.assertEqual(wt.next_host_port([3001]), 3003)
+
+
+class CredentialLoadTest(unittest.TestCase):
+    def test_parses_export_line(self):
+        self.assertEqual(wt._parse_exported_key('export BOXLITE_API_KEY="abc"'), "abc")
+        self.assertEqual(wt._parse_exported_key("BOXLITE_API_KEY=xyz"), "xyz")
+
+
+class StatusNormalizeTest(unittest.TestCase):
+    def test_running_flag(self):
+        info = mock.Mock()
+        info.state.running = True
+        info.state.status = "started"
+        self.assertEqual(wt.normalize_status(info), "running")
+
+    def test_stopped(self):
+        info = mock.Mock()
+        info.state.running = False
+        info.state.status = "stopped"
+        self.assertEqual(wt.normalize_status(info), "stopped")
+
 
 @unittest.skipUnless(importlib.util.find_spec("boxlite"), "boxlite is not installed")
 class BoxOptionsTest(unittest.TestCase):
@@ -88,8 +142,70 @@ class BoxOptionsTest(unittest.TestCase):
 
     def test_cloud_options_construct(self):
         options = wt.create_box_options("cloud")
-        self.assertFalse(options.auto_remove)
+        self.assertIn(options.auto_remove, (None, False))
         self.assertTrue(options.detach)
+
+
+class ResourceSpecTest(unittest.TestCase):
+    def test_defaults(self):
+        self.assertEqual(wt.parse_resources(None), wt.DEFAULT_RESOURCES)
+
+    def test_custom_values(self):
+        self.assertEqual(
+            wt.parse_resources({"cpus": 2, "memory_mib": 2048, "disk_size_gb": 20}),
+            {"cpus": 2, "memory_mib": 2048, "disk_size_gb": 20},
+        )
+
+    def test_rejects_small_memory(self):
+        with self.assertRaisesRegex(RuntimeError, "memory_mib"):
+            wt.parse_resources({"memory_mib": 128})
+
+
+class CloudCreatePayloadTest(unittest.TestCase):
+    def test_omits_legacy_auto_remove(self):
+        payload = wt.cloud_create_payload("web-terminal-demo")
+        self.assertEqual(payload["name"], "web-terminal-demo")
+        self.assertNotIn("auto_remove", payload)
+        self.assertNotIn("ports", payload)
+        self.assertEqual(payload["auto_stop"], 0)
+        self.assertEqual(payload["network"]["outbound"]["mode"], "enabled")
+
+    def test_uses_requested_resources(self):
+        payload = wt.cloud_create_payload(
+            "web-terminal-demo",
+            {"cpus": 4, "memory_mib": 4096, "disk_size_gb": 30},
+        )
+        self.assertEqual(payload["cpus"], 4)
+        self.assertEqual(payload["memory_mib"], 4096)
+        self.assertEqual(payload["disk_size_gb"], 30)
+
+
+class BoxOptionsKwargsTest(unittest.TestCase):
+    def test_embedded_options_accept_explicit_host_port(self):
+        box_options = mock.Mock()
+        network_spec = mock.Mock(return_value="net")
+        with mock.patch(
+            "web_terminal_boxlite._import_boxlite",
+            return_value=(None, None, box_options, network_spec, None),
+        ):
+            wt.create_box_options("embedded", host_port=4020)
+        kwargs = box_options.call_args.kwargs
+        self.assertEqual(kwargs["ports"][0]["host_port"], 4020)
+        self.assertEqual(kwargs["ports"][0]["guest_port"], wt.PORT)
+        self.assertFalse(kwargs["auto_remove"])
+
+    def test_cloud_options_omit_auto_remove(self):
+        box_options = mock.Mock()
+        network_spec = mock.Mock(return_value="net")
+        with mock.patch(
+            "web_terminal_boxlite._import_boxlite",
+            return_value=(None, None, box_options, network_spec, None),
+        ):
+            with mock.patch("web_terminal_boxlite._box_options_accepts", return_value=True):
+                wt.create_box_options("cloud")
+        kwargs = box_options.call_args.kwargs
+        self.assertNotIn("auto_remove", kwargs)
+        self.assertNotIn("ports", kwargs)
 
 
 if __name__ == "__main__":

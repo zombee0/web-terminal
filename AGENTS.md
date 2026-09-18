@@ -120,6 +120,16 @@ BOXLITE_BOX_ID=<id> "$PYTHON" update_web_terminal.py
 
 Use the same `BOXLITE_RUNTIME` as the original deploy.
 
+Host control console (lifecycle UI, still on the host):
+
+```bash
+"$PYTHON" control_web_terminal.py
+```
+
+Default URL is `http://127.0.0.1:3100`. Do not expose this process. Cloud
+access links shown in the UI contain `BOXLITE_BOX_AUTH_KEY`; do not paste them
+into git or unredacted logs.
+
 ## 4. Verify
 
 Cloud: `URL` is an authenticated preview URL. Do not paste it into git or
@@ -141,8 +151,11 @@ If `websockets` is missing, rerun `bash bootstrap_host.sh`.
 | Path | Role |
 |---|---|
 | `bootstrap_host.sh` | Host SDK/toolchain install |
+| `control_web_terminal.py` | Host control plane (create/stop/resume/delete) |
+| `control.html` | Geek-style control console UI |
 | `deploy_web_terminal.py` | Create/provision Box |
 | `update_web_terminal.py` | Replace guest binary |
+| `web_terminal_provision.py` | Guest bootstrap + app install/start |
 | `web_terminal_boxlite.py` | Cloud vs embedded helper |
 | `build_web_terminal_binary.sh` | Cross-compile Linux guest binary |
 | `e2e_web_terminal.py` | HTTP + WebSocket PTY check |
