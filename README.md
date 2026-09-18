@@ -50,7 +50,7 @@ Override bind address with `WEB_TERMINAL_CONTROL_HOST` /
 
 ## Deploy
 
-Cloud REST on `dev.boxlite.ai` is the default:
+Cloud REST on `app.boxlite.ai` is the default:
 
 ```bash
 export BOXLITE_API_KEY=...

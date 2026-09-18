@@ -5,7 +5,7 @@ metadata:
   name: web-terminal
   displayName: agent.market Web Terminal
   version: 0.1.0
-  description: Browser terminal with Codex, tmux, UTF-8 locale, and the agent.market runtime setup.
+  description: Browser terminal with Codex, Claude Code, Cursor CLI, tmux, UTF-8 locale, and the agent.market runtime setup.
 
 runtime:
   mode: service
@@ -42,5 +42,5 @@ permissions:
   capabilities: []
 
 healthcheck:
-  command: ["sh", "-ec", "test \"$(id -u)\" != 0; command -v codex; codex --version; tmux -V; curl -fsS http://127.0.0.1:3001/healthz"]
+  command: ["sh", "-ec", "test \"$(id -u)\" != 0; command -v codex; command -v claude; command -v agent; tmux -V; curl -fsS http://127.0.0.1:3001/healthz"]
   timeoutSeconds: 15

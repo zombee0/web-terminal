@@ -1,7 +1,10 @@
 """Provision and restart Web Terminal inside a BoxLite sandbox."""
 
 import os
+import pathlib
+import re
 import secrets
+import urllib.request
 from datetime import datetime, timezone
 
 from web_terminal_boxlite import (
@@ -10,6 +13,7 @@ from web_terminal_boxlite import (
     create_box_options,
     create_cloud_box,
     ensure_started,
+    guest_goarch,
     parse_resources,
     run_checked,
     service_url,
@@ -34,9 +38,11 @@ apt-get install -y --no-install-recommends \
   fontconfig \
   fonts-noto-cjk \
   fonts-noto-color-emoji \
+  git \
   locales \
   passwd \
   procps \
+  tar \
   tmux \
   util-linux
 
@@ -61,6 +67,130 @@ su -s /bin/bash boxlite -c \
   'HOME=/home/boxlite PATH=/home/boxlite/.local/bin:/usr/local/bin:/usr/bin:/bin codex --version'
 rm -rf /var/lib/apt/lists/*
 """
+
+INSTALL_AGENT_CLIS_COMMAND = r"""
+set -eu
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Installing agent CLIs requires root inside the Box." >&2
+  exit 1
+fi
+if ! grep -q '^boxlite:' /etc/passwd 2>/dev/null; then
+  useradd --create-home --shell /bin/bash boxlite
+fi
+install -d -o boxlite -g boxlite \
+  /home/boxlite/.local/bin \
+  /home/boxlite/.local/share/cursor-agent/versions \
+  /home/boxlite/.npm-global/bin
+BOXLITE_ENV='HOME=/home/boxlite PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin'
+
+CLAUDE_SRC=/home/boxlite/.web-terminal-claude
+if [ -d "$CLAUDE_SRC" ]; then
+  CLAUDE_SRC=$(find "$CLAUDE_SRC" -type f | head -n 1)
+fi
+if [ ! -f "$CLAUDE_SRC" ]; then
+  echo "Claude binary was not uploaded" >&2
+  exit 1
+fi
+install -m 0755 -o boxlite -g boxlite "$CLAUDE_SRC" /home/boxlite/.local/bin/claude
+rm -rf /home/boxlite/.web-terminal-claude
+
+CURSOR_TAR=/home/boxlite/.web-terminal-cursor-agent.tar.gz
+CURSOR_VER_FILE=/home/boxlite/.web-terminal-cursor-version
+if [ -d "$CURSOR_TAR" ]; then
+  CURSOR_TAR=$(find "$CURSOR_TAR" -type f | head -n 1)
+fi
+if [ -d "$CURSOR_VER_FILE" ]; then
+  CURSOR_VER_FILE=$(find "$CURSOR_VER_FILE" -type f | head -n 1)
+fi
+if [ ! -f "$CURSOR_TAR" ] || [ ! -s "$CURSOR_VER_FILE" ]; then
+  echo "Cursor archive was not uploaded" >&2
+  exit 1
+fi
+CURSOR_VERSION=$(cat "$CURSOR_VER_FILE")
+CURSOR_DEST=/home/boxlite/.local/share/cursor-agent/versions/$CURSOR_VERSION
+rm -rf "$CURSOR_DEST"
+mkdir -p "$CURSOR_DEST"
+tar --strip-components=1 -xzf "$CURSOR_TAR" -C "$CURSOR_DEST"
+chown -R boxlite:boxlite /home/boxlite/.local/share/cursor-agent
+ln -sfn "$CURSOR_DEST/cursor-agent" /home/boxlite/.local/bin/agent
+ln -sfn "$CURSOR_DEST/cursor-agent" /home/boxlite/.local/bin/cursor-agent
+chown -h boxlite:boxlite /home/boxlite/.local/bin/agent /home/boxlite/.local/bin/cursor-agent
+rm -f /home/boxlite/.web-terminal-cursor-agent.tar.gz /home/boxlite/.web-terminal-cursor-version
+
+su -s /bin/bash boxlite -c "$BOXLITE_ENV claude --version"
+su -s /bin/bash boxlite -c "$BOXLITE_ENV agent --version"
+"""
+
+CHECK_AGENT_CLIS_COMMAND = r"""
+set -eu
+BOXLITE_ENV='HOME=/home/boxlite PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin'
+su -s /bin/bash boxlite -c "$BOXLITE_ENV command -v claude >/dev/null"
+su -s /bin/bash boxlite -c "$BOXLITE_ENV command -v agent >/dev/null"
+su -s /bin/bash boxlite -c "$BOXLITE_ENV claude --version"
+su -s /bin/bash boxlite -c "$BOXLITE_ENV agent --version"
+"""
+
+CLI_CACHE_DIR = pathlib.Path.home() / ".web-terminal" / "cli-cache"
+CLAUDE_RELEASES_URL = "https://downloads.claude.ai/claude-code-releases"
+CURSOR_INSTALL_URL = "https://cursor.com/install"
+_HTTP_HEADERS = {"User-Agent": "web-terminal-provision"}
+
+
+def _cli_linux_arch(mode):
+    arch = guest_goarch(mode)
+    if arch == "amd64":
+        return "x64"
+    if arch == "arm64":
+        return "arm64"
+    raise RuntimeError(f"Unsupported guest architecture for agent CLIs: {arch}")
+
+
+def _http_download(url, dest=None, timeout=120):
+    request = urllib.request.Request(url, headers=_HTTP_HEADERS)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        data = response.read()
+    if dest is None:
+        return data
+    dest = pathlib.Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+    return dest
+
+
+def fetch_agent_cli_artifacts(mode, *, log=None):
+    arch = _cli_linux_arch(mode)
+    cache = CLI_CACHE_DIR / arch
+    cache.mkdir(parents=True, exist_ok=True)
+
+    _emit(log, f"downloading Claude Code for linux-{arch}")
+    version = _http_download(f"{CLAUDE_RELEASES_URL}/latest").decode().strip()
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+.*", version):
+        raise RuntimeError("Claude release metadata was not a version string")
+    claude_bin = cache / f"claude-{version}-linux-{arch}"
+    if not claude_bin.is_file():
+        _http_download(
+            f"{CLAUDE_RELEASES_URL}/{version}/linux-{arch}/claude",
+            claude_bin,
+            timeout=180,
+        )
+        claude_bin.chmod(0o755)
+
+    _emit(log, "downloading Cursor CLI")
+    installer = _http_download(CURSOR_INSTALL_URL).decode()
+    match = re.search(r"lab/([^/]+)/", installer)
+    if match is None:
+        raise RuntimeError("Cursor installer did not include a package version")
+    cursor_version = match.group(1)
+    cursor_tarball = cache / f"cursor-agent-{cursor_version}-linux-{arch}.tar.gz"
+    if not cursor_tarball.is_file():
+        _http_download(
+            f"https://downloads.cursor.com/lab/{cursor_version}/linux/{arch}/agent-cli-package.tar.gz",
+            cursor_tarball,
+            timeout=180,
+        )
+    cursor_version_file = cache / f"cursor-agent-{cursor_version}-linux-{arch}.version"
+    cursor_version_file.write_text(cursor_version + "\n", encoding="utf-8")
+    return claude_bin, cursor_tarball, cursor_version_file
 
 INSTALL_APP_COMMAND = r"""
 set -eu
@@ -135,6 +265,35 @@ async def resolve_box(runtime, box_id, fallback_name=None):
     return box, box_display_name(info, fallback_name or box_id)
 
 
+async def install_agent_clis(box, mode, *, log=None):
+    try:
+        await run_checked(
+            box,
+            "sh",
+            args=["-lc", CHECK_AGENT_CLIS_COMMAND],
+            user="root",
+            timeout_secs=30,
+            log=log,
+        )
+        _emit(log, "Claude Code and Cursor CLI already installed")
+        return
+    except RuntimeError:
+        pass
+    _emit(log, "installing Claude Code and Cursor CLI")
+    claude_bin, cursor_tarball, cursor_version = fetch_agent_cli_artifacts(mode, log=log)
+    await box.copy_in(str(claude_bin), "/home/boxlite/.web-terminal-claude")
+    await box.copy_in(str(cursor_tarball), "/home/boxlite/.web-terminal-cursor-agent.tar.gz")
+    await box.copy_in(str(cursor_version), "/home/boxlite/.web-terminal-cursor-version")
+    await run_checked(
+        box,
+        "sh",
+        args=["-lc", INSTALL_AGENT_CLIS_COMMAND],
+        user="root",
+        timeout_secs=120,
+        log=log,
+    )
+
+
 async def install_web_terminal(box, mode, *, log=None):
     await box.copy_in(str(app_path(mode)), "/home/boxlite/.web-terminal-upload")
     await run_checked(
@@ -159,6 +318,7 @@ async def provision_web_terminal(runtime, box, mode, *, host_port=None, log=None
         timeout_secs=900,
         log=log,
     )
+    await install_agent_clis(box, mode, log=log)
     _emit(log, "installing web-terminal")
     await install_web_terminal(box, mode, log=log)
     _emit(log, "waiting for guest /healthz")
@@ -171,10 +331,20 @@ async def provision_web_terminal(runtime, box, mode, *, host_port=None, log=None
 
 
 async def resume_web_terminal(
-    runtime, box, mode, *, host_port=None, log=None, reinstall=False, authenticated=True
+    runtime,
+    box,
+    mode,
+    *,
+    host_port=None,
+    log=None,
+    reinstall=False,
+    authenticated=True,
+    install_clis=True,
 ):
     _emit(log, "resuming box")
     await ensure_started(runtime, box, mode)
+    if install_clis:
+        await install_agent_clis(box, mode, log=log)
     if reinstall:
         _emit(log, "reinstalling web-terminal")
         await install_web_terminal(box, mode, log=log)
@@ -198,6 +368,8 @@ async def resume_web_terminal(
                 host_port=host_port,
                 log=log,
                 reinstall=True,
+                authenticated=authenticated,
+                install_clis=False,
             )
     await wait_for_guest_health(box, attempts=30, timeout_secs=60, log=log)
     url = service_url(mode, box, authenticated=authenticated, host_port=host_port)

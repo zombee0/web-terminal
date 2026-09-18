@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 
 
-DEFAULT_REST_URL = "https://dev.boxlite.ai/api"
+DEFAULT_REST_URL = "https://app.boxlite.ai/api"
 DEFAULT_IMAGE = "python"
 DEFAULT_RESOURCES = {"cpus": 1, "memory_mib": 1024, "disk_size_gb": 10}
 PORT = 3001

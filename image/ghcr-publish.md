@@ -23,9 +23,10 @@ export SOURCE_REPOSITORY=https://github.com/your-org/your-repo
 bash image/build_web_terminal_image.sh
 ```
 
-The multi-stage build compiles the source and installs Bash, Codex, tmux, a
-UTF-8 locale, and fonts in the final image. The image runs as `boxlite` and its
-entrypoint starts the foreground service on port `3001`.
+The multi-stage build compiles the source and installs Bash, Codex, Claude
+Code, Cursor CLI, tmux, a UTF-8 locale, and fonts in the final image. The image
+runs as `boxlite` and its entrypoint starts the foreground service on port
+`3001`.
 
 The separate deployment scripts use `build/web-terminal-linux-amd64`. Running
 `build_web_terminal_binary.sh` creates that file without modifying the image
@@ -53,7 +54,7 @@ LOCAL_IMAGE=web-terminal:0.1.0 bash image/test_web_terminal_image.sh
 ```
 
 The helper is intended to check the target architecture, non-root identity,
-Codex, tmux, UTF-8, `/healthz`, and the home page. It binds a randomly selected
+Codex, Claude Code, Cursor CLI, tmux, UTF-8, `/healthz`, and the home page. It binds a randomly selected
 host port on `127.0.0.1`, stops only its own container, does not call model APIs,
 and does not validate BoxLite integration.
 
@@ -70,7 +71,7 @@ curl -fsS http://127.0.0.1:3001/healthz
 ```
 
 Open `http://127.0.0.1:3001` and verify terminal input, multilingual text,
-resize handling, `id`, `codex --version`, and `tmux -V`. Each connection starts
+resize handling, `id`, `codex --version`, `claude --version`, `agent --version`, and `tmux -V`. Each connection starts
 a new shell. Use `tmux new -A -s work` when persistent shell state is needed.
 The browser must be able to load xterm.js from jsDelivr.
 
@@ -78,7 +79,7 @@ Override the entrypoint for image diagnostics:
 
 ```bash
 docker run --rm --entrypoint /bin/bash "$LOCAL_IMAGE" -ec \
-  'id; command -v codex; codex --version; tmux -V'
+  'id; command -v codex; command -v claude; command -v agent; tmux -V'
 ```
 
 Do not publish port `22222`. The image contract and external service manifest

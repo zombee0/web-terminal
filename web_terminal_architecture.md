@@ -15,6 +15,8 @@ ingress, preview URLs, Docker publishing, or marketplace manifests.
 The runtime environment should include:
 
 - Codex CLI
+- Claude Code (`claude`)
+- Cursor CLI (`agent` / `cursor-agent`)
 - tmux
 - The Go Web Terminal binary
 - Bash
@@ -46,7 +48,7 @@ The service supports:
 - Terminal resize messages
 - A UTF-8 locale
 - `TERM=xterm-256color`
-- A PATH that includes Codex
+- A PATH that includes Codex, Claude Code, and Cursor CLI (`~/.local/bin`)
 
 PTY output must use binary WebSocket frames. Sending arbitrary PTY bytes as
 text frames can cause browsers to close the connection when output is not
@@ -77,7 +79,7 @@ source code, URLs committed to Git, or ordinary logs.
 BoxLite API or SDK calls belong in a trusted deployment backend, not inside an
 untrusted terminal session. The development scripts support two backends:
 
-- Cloud REST (default): `Boxlite.rest(...)` against `dev.boxlite.ai`
+- Cloud REST (default): `Boxlite.rest(...)` against `app.boxlite.ai`
 - Local embedded: `Boxlite.default()`, with guest port `3001` forwarded to
   `127.0.0.1`
 
@@ -101,12 +103,14 @@ include `BOXLITE_BOX_AUTH_KEY` and must be treated as secrets.
 The deployment scripts in this repository are development tools. They are not
 a replacement for a production orchestration API.
 
-## Codex Authentication
+## Agent CLI Authentication
 
-Interactive ChatGPT device login can be initiated inside the Box with:
+Interactive logins can be initiated inside the Box after provision:
 
 ```bash
 codex login --device-auth
+claude auth login
+agent login
 ```
 
 One-time codes must expire, must not appear in ordinary logs, and must never be

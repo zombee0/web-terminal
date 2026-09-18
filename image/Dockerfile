@@ -19,6 +19,8 @@ FROM ${BASE_IMAGE}
 ARG BOXLITE_USER=boxlite
 ARG CODEX_INSTALL_URL=https://chatgpt.com/codex/install.sh
 ARG CODEX_EXPECTED_VERSION
+ARG CLAUDE_INSTALL_URL=https://claude.ai/install.sh
+ARG CURSOR_INSTALL_URL=https://cursor.com/install
 
 USER root
 
@@ -32,8 +34,10 @@ RUN set -eux; \
       fontconfig \
       fonts-noto-cjk \
       fonts-noto-color-emoji \
+      git \
       locales \
       passwd \
+      tar \
       tmux; \
     if ! id -u "${BOXLITE_USER}" >/dev/null 2>&1; then \
       useradd --create-home --shell /bin/bash "${BOXLITE_USER}"; \
@@ -60,6 +64,20 @@ RUN curl -fsSL "${CODEX_INSTALL_URL}" -o /tmp/install-codex.sh \
     && codex --version \
     && if [ -n "${CODEX_EXPECTED_VERSION}" ]; then \
          test "$(codex --version)" = "${CODEX_EXPECTED_VERSION}"; fi
+
+# Official Claude Code and Cursor CLI installers. No API credentials are
+# included; authentication happens at runtime inside the Box.
+RUN curl -fsSL "${CLAUDE_INSTALL_URL}" -o /tmp/install-claude.sh \
+    && CI=1 bash /tmp/install-claude.sh stable \
+    && rm /tmp/install-claude.sh \
+    && command -v claude \
+    && claude --version
+
+RUN curl -fsSL "${CURSOR_INSTALL_URL}" -o /tmp/install-cursor.sh \
+    && bash /tmp/install-cursor.sh \
+    && rm /tmp/install-cursor.sh \
+    && command -v agent \
+    && agent --version
 
 USER root
 COPY --from=builder --chmod=0755 /out/web-terminal /usr/local/bin/web-terminal

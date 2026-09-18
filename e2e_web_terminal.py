@@ -42,11 +42,13 @@ async def exercise_terminal(ws_url):
             lambda text: "uid=" in text and "boxlite" in text,
             timeout=20,
         )
-        await ws.send("tmux -V; command -v codex; id\n")
+        await ws.send("tmux -V; command -v codex; command -v claude; command -v agent; id\n")
         output = await wait_for_output(
             ws,
             lambda text: bool(re.search(r"tmux \d", text))
             and "/codex" in text
+            and "/claude" in text
+            and "/agent" in text
             and "uid=" in text
             and "boxlite" in text,
             timeout=20,

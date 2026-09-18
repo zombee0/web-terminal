@@ -14,7 +14,7 @@ Two backends:
 
 | Backend | When to use | Runtime |
 |---|---|---|
-| `cloud` (default) | User says cloud / remote / `dev.boxlite.ai` | `Boxlite.rest(...)` |
+| `cloud` (default) | User says cloud / remote / `app.boxlite.ai` | `Boxlite.rest(...)` |
 | `embedded` | User says local / embedded / laptop sandbox | `Boxlite.default()` |
 
 Aliases: `BOXLITE_RUNTIME=rest|remote` → cloud; `local` → embedded.
@@ -69,8 +69,8 @@ Required:
 eval "$(grep -E '^[[:space:]]*(export[[:space:]]+)?BOXLITE_API_KEY=' ~/.zshrc ~/.bashrc 2>/dev/null | head -n 1)"
 export BOXLITE_API_KEY
 export BOXLITE_RUNTIME=cloud
-# optional; script default is https://dev.boxlite.ai/api
-export BOXLITE_REST_URL="${BOXLITE_REST_URL:-https://dev.boxlite.ai/api}"
+# optional; script default is https://app.boxlite.ai/api
+export BOXLITE_REST_URL="${BOXLITE_REST_URL:-https://app.boxlite.ai/api}"
 ```
 
 If the key is missing, stop and ask the user for it. Do not invent one.
@@ -95,11 +95,12 @@ Optional: `BOXLITE_IMAGE`, `BOXLITE_BOX_NAME`, `BOXLITE_BOX_ID` (resume),
 ## 3. Deploy
 
 The deploy script builds `build/web-terminal-linux-<arch>` if missing, creates
-or resumes a Box, apt-installs tmux/fonts/locales, installs Codex CLI inside
-the guest, copies the binary, and starts `/usr/local/bin/web-terminal`.
+or resumes a Box, apt-installs tmux/fonts/locales, installs Codex, Claude
+Code, and Cursor CLI inside the guest, copies the binary, and starts
+`/usr/local/bin/web-terminal`.
 
 First-time provision often takes **10–15 minutes** (Debian packages + CJK
-fonts + Codex). Wait for it. Bootstrap timeout is 900 seconds.
+fonts + agent CLIs). Wait for it. Bootstrap timeout is 900 seconds.
 
 ```bash
 # PYTHON is the interpreter printed by bootstrap_host.sh
@@ -112,7 +113,7 @@ for updates.
 Interrupted deploy: set `BOXLITE_BOX_ID` to the printed id and rerun the same
 command. Do not create a second Box unless the user wants a new one.
 
-Update binary only (no apt/Codex reinstall):
+Update binary only (no apt/CLI reinstall):
 
 ```bash
 BOXLITE_BOX_ID=<id> "$PYTHON" update_web_terminal.py
@@ -142,7 +143,8 @@ Local: `URL` is `http://127.0.0.1:<BOXLITE_HOST_PORT>`.
 ```
 
 Pass means `/healthz` → `ok`, home page serves Box Terminal, WebSocket PTY
-runs as `uid=1000(boxlite)`, `tmux` reports a version, and `codex` is on PATH.
+runs as `uid=1000(boxlite)`, `tmux` reports a version, and `codex`, `claude`,
+and `agent` (Cursor CLI) are on PATH.
 
 If `websockets` is missing, rerun `bash bootstrap_host.sh`.
 
@@ -177,7 +179,6 @@ Guest binary names:
   embedded unless the user asked for local.
 - Guest `/healthz` ok but host cannot connect (embedded): confirm
   `BOXLITE_HOST_PORT` is free and the process still binds `:3001`.
-- `https://dev.boxlite.ai` timeout from inside a cloud Box does not fail
-  deploy; guest egress policy may block that host while `app.boxlite.ai`
-  still works.
+- `https://app.boxlite.ai` timeout from inside a cloud Box does not fail
+  deploy; guest egress policy may block that host.
 - Do not debug by publishing extra ports.

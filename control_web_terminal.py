@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from web_terminal_boxlite import (
+    DEFAULT_REST_URL,
     cloud_ready,
     create_runtime,
     delete_box,
@@ -233,7 +234,7 @@ class ControlService:
         return {
             "cloud": {
                 "ready": cloud_ready(),
-                "rest_url": os.environ.get("BOXLITE_REST_URL") or "https://dev.boxlite.ai/api",
+                "rest_url": os.environ.get("BOXLITE_REST_URL") or DEFAULT_REST_URL,
             },
             "embedded": {"ready": True},
             "control": {
