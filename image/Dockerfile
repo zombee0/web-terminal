@@ -7,12 +7,12 @@ FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
-COPY main.go main_test.go ./
+COPY cmd/web-terminal ./cmd/web-terminal
 RUN go test ./...
 ARG TARGETOS
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /out/web-terminal .
+    go build -trimpath -ldflags="-s -w" -o /out/web-terminal ./cmd/web-terminal
 
 FROM ${BASE_IMAGE}
 

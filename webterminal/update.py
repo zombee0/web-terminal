@@ -3,8 +3,8 @@
 import asyncio
 import os
 
-from web_terminal_boxlite import create_runtime, prepare_runtime_env, runtime_mode
-from web_terminal_provision import resolve_box, resume_web_terminal
+from webterminal.boxlite import create_runtime, prepare_runtime_env, runtime_mode
+from webterminal.provision import resolve_box, resume_web_terminal
 
 
 async def main():

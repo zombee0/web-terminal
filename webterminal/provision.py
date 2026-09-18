@@ -7,7 +7,7 @@ import secrets
 import urllib.request
 from datetime import datetime, timezone
 
-from web_terminal_boxlite import (
+from webterminal.boxlite import (
     app_path,
     box_display_name,
     create_box_options,

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from web_terminal_boxlite import (
+from webterminal.boxlite import (
     DEFAULT_REST_URL,
     cloud_ready,
     create_runtime,
@@ -31,7 +31,7 @@ from web_terminal_boxlite import (
     redact_url,
     service_url,
 )
-from web_terminal_provision import (
+from webterminal.provision import (
     create_managed_box,
     provision_web_terminal,
     resolve_box,

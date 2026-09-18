@@ -50,16 +50,16 @@ file protocol.
 
 ## Development Scripts
 
-`deploy_web_terminal.py` creates and provisions a development Box on cloud REST
+`python3 -m webterminal.deploy` creates and provisions a development Box on cloud REST
 by default, or in a local embedded BoxLite VM when `BOXLITE_RUNTIME=embedded`.
-`update_web_terminal.py` updates an existing Box selected explicitly through
+`python3 -m webterminal.update` updates an existing Box selected explicitly through
 `BOXLITE_BOX_ID`. These scripts support rapid source iteration; they are not a
 production marketplace deployment API and do not validate image execution.
 
 The deployment script requests one CPU, 1024 MiB of memory, a 10 GiB disk, and
-unrestricted outbound networking. It installs Codex, tmux, a UTF-8 locale, and
-fonts with CJK coverage. The update script does not create a Box or reinstall
-those dependencies.
+unrestricted outbound networking. It installs Codex, Claude Code, Cursor CLI,
+tmux, a UTF-8 locale, and fonts with CJK coverage. The update script does not
+create a Box or reinstall those dependencies.
 
 ## Port Policy
 

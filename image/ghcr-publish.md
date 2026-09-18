@@ -29,8 +29,8 @@ runs as `boxlite` and its entrypoint starts the foreground service on port
 `3001`.
 
 The separate deployment scripts use `build/web-terminal-linux-amd64`. Running
-`build_web_terminal_binary.sh` creates that file without modifying the image
-build. The `build/` directory is ignored by Git.
+`scripts/build_web_terminal_binary.sh` creates that file without modifying the
+image build. The `build/` directory is ignored by Git.
 
 ### Reproducibility Boundary
 

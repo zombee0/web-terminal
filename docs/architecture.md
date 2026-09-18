@@ -95,7 +95,7 @@ The backend is responsible for:
   port forwarding on the local embedded runtime
 - Enforcing timeouts and cleanup
 
-The host control console (`control_web_terminal.py` + `control.html`) is the
+The host control console (`python3 -m webterminal.control` + `webterminal/control.html`) is the
 interactive operator UI for that backend. It binds loopback by default, lets
 the operator pick cloud or local, and shows each Box's access URL. Cloud URLs
 include `BOXLITE_BOX_AUTH_KEY` and must be treated as secrets.

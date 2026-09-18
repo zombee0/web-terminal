@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest import mock
 
-import web_terminal_boxlite as wt
+from webterminal import boxlite as wt
 
 
 class RuntimeModeTest(unittest.TestCase):
@@ -43,9 +43,9 @@ class GuestArchTest(unittest.TestCase):
         env = os.environ.copy()
         env.pop("WEB_TERMINAL_GOARCH", None)
         with mock.patch.dict(os.environ, env, clear=True):
-            with mock.patch("web_terminal_boxlite.platform.machine", return_value="arm64"):
+            with mock.patch("webterminal.boxlite.platform.machine", return_value="arm64"):
                 self.assertEqual(wt.guest_goarch("embedded"), "arm64")
-            with mock.patch("web_terminal_boxlite.platform.machine", return_value="x86_64"):
+            with mock.patch("webterminal.boxlite.platform.machine", return_value="x86_64"):
                 self.assertEqual(wt.guest_goarch("embedded"), "amd64")
 
     def test_override(self):
@@ -104,7 +104,7 @@ class PublishedPortTest(unittest.TestCase):
 class PortAllocationTest(unittest.TestCase):
     def test_skips_used_and_busy_ports(self):
         with mock.patch.dict(os.environ, {"BOXLITE_HOST_PORT": "3001"}):
-            with mock.patch("web_terminal_boxlite.port_is_free", side_effect=lambda port, host="127.0.0.1": port != 3002):
+            with mock.patch("webterminal.boxlite.port_is_free", side_effect=lambda port, host="127.0.0.1": port != 3002):
                 self.assertEqual(wt.next_host_port([3001]), 3003)
 
 
@@ -185,7 +185,7 @@ class BoxOptionsKwargsTest(unittest.TestCase):
         box_options = mock.Mock()
         network_spec = mock.Mock(return_value="net")
         with mock.patch(
-            "web_terminal_boxlite._import_boxlite",
+            "webterminal.boxlite._import_boxlite",
             return_value=(None, None, box_options, network_spec, None),
         ):
             wt.create_box_options("embedded", host_port=4020)
@@ -198,10 +198,10 @@ class BoxOptionsKwargsTest(unittest.TestCase):
         box_options = mock.Mock()
         network_spec = mock.Mock(return_value="net")
         with mock.patch(
-            "web_terminal_boxlite._import_boxlite",
+            "webterminal.boxlite._import_boxlite",
             return_value=(None, None, box_options, network_spec, None),
         ):
-            with mock.patch("web_terminal_boxlite._box_options_accepts", return_value=True):
+            with mock.patch("webterminal.boxlite._box_options_accepts", return_value=True):
                 wt.create_box_options("cloud")
         kwargs = box_options.call_args.kwargs
         self.assertNotIn("auto_remove", kwargs)

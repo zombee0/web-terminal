@@ -1,4 +1,4 @@
-module agenttest/web-terminal
+module github.com/zombee0/web-terminal
 
 go 1.26.5
 

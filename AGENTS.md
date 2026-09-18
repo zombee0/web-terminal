@@ -36,7 +36,7 @@ Aliases: `BOXLITE_RUNTIME=rest|remote` → cloud; `local` → embedded.
 From the repo root, run:
 
 ```bash
-bash bootstrap_host.sh
+bash scripts/bootstrap_host.sh
 ```
 
 The script installs whatever is missing:
@@ -53,7 +53,7 @@ Embedded extra requirements (not installed by the script):
 - macOS: Apple Silicon (Hypervisor.framework)
 - Linux: KVM (`/dev/kvm` accessible)
 
-`bootstrap_host.sh` is idempotent. Run it at the start of every deploy
+`scripts/bootstrap_host.sh` is idempotent. Run it at the start of every deploy
 session.
 
 ## 2. Choose backend and env
@@ -103,8 +103,8 @@ First-time provision often takes **10–15 minutes** (Debian packages + CJK
 fonts + agent CLIs). Wait for it. Bootstrap timeout is 900 seconds.
 
 ```bash
-# PYTHON is the interpreter printed by bootstrap_host.sh
-"$PYTHON" deploy_web_terminal.py
+# PYTHON is the interpreter printed by scripts/bootstrap_host.sh
+"$PYTHON" -m webterminal.deploy
 ```
 
 Success prints `RUNTIME=`, `BOX_ID=`, `BOX_NAME=`, and `URL=`. Keep `BOX_ID`
@@ -116,7 +116,7 @@ command. Do not create a second Box unless the user wants a new one.
 Update binary only (no apt/CLI reinstall):
 
 ```bash
-BOXLITE_BOX_ID=<id> "$PYTHON" update_web_terminal.py
+BOXLITE_BOX_ID=<id> "$PYTHON" -m webterminal.update
 ```
 
 Use the same `BOXLITE_RUNTIME` as the original deploy.
@@ -124,7 +124,7 @@ Use the same `BOXLITE_RUNTIME` as the original deploy.
 Host control console (lifecycle UI, still on the host):
 
 ```bash
-"$PYTHON" control_web_terminal.py
+"$PYTHON" -m webterminal.control
 ```
 
 Default URL is `http://127.0.0.1:3100`. Do not expose this process. Cloud
@@ -139,29 +139,31 @@ unredacted logs. Check `/healthz` through that URL.
 Local: `URL` is `http://127.0.0.1:<BOXLITE_HOST_PORT>`.
 
 ```bash
-"$PYTHON" e2e_web_terminal.py --base-url "$URL"
+"$PYTHON" scripts/e2e_web_terminal.py --base-url "$URL"
 ```
 
 Pass means `/healthz` → `ok`, home page serves Box Terminal, WebSocket PTY
 runs as `uid=1000(boxlite)`, `tmux` reports a version, and `codex`, `claude`,
 and `agent` (Cursor CLI) are on PATH.
 
-If `websockets` is missing, rerun `bash bootstrap_host.sh`.
+If `websockets` is missing, rerun `bash scripts/bootstrap_host.sh`.
 
 ## 5. Layout
 
 | Path | Role |
 |---|---|
-| `bootstrap_host.sh` | Host SDK/toolchain install |
-| `control_web_terminal.py` | Host control plane (create/stop/resume/delete) |
-| `control.html` | Geek-style control console UI |
-| `deploy_web_terminal.py` | Create/provision Box |
-| `update_web_terminal.py` | Replace guest binary |
-| `web_terminal_provision.py` | Guest bootstrap + app install/start |
-| `web_terminal_boxlite.py` | Cloud vs embedded helper |
-| `build_web_terminal_binary.sh` | Cross-compile Linux guest binary |
-| `e2e_web_terminal.py` | HTTP + WebSocket PTY check |
-| `main.go` | Guest service (`:3001`, `/`, `/ws`, `/healthz`) |
+| `scripts/bootstrap_host.sh` | Host SDK/toolchain install |
+| `webterminal/control.py` | Hangar control plane (create/stop/resume/delete) |
+| `webterminal/control.html` | Geek-style control console UI |
+| `webterminal/deploy.py` | Create/provision Box |
+| `webterminal/update.py` | Replace guest binary |
+| `webterminal/provision.py` | Guest bootstrap + app install/start |
+| `webterminal/boxlite.py` | Cloud vs embedded helper |
+| `scripts/build_web_terminal_binary.sh` | Cross-compile Linux guest binary |
+| `scripts/e2e_web_terminal.py` | HTTP + WebSocket PTY check |
+| `cmd/web-terminal/` | Guest service (`:3001`, `/`, `/ws`, `/healthz`) |
+| `docs/` | Architecture and design notes |
+| `tests/` | Host-side unit tests |
 | `image/` | OCI image path (provisional; not required for script deploy) |
 
 Guest binary names:

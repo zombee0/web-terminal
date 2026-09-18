@@ -3,12 +3,12 @@
 import asyncio
 import os
 
-from web_terminal_boxlite import (
+from webterminal.boxlite import (
     create_runtime,
     prepare_runtime_env,
     runtime_mode,
 )
-from web_terminal_provision import (
+from webterminal.provision import (
     create_managed_box,
     provision_web_terminal,
     resolve_box,
@@ -32,7 +32,7 @@ async def main():
     print(f"BOX_NAME={box_name}")
     print(f"URL={url}")
     print(
-        f"To update this Box: BOXLITE_RUNTIME={mode} BOXLITE_BOX_ID={box.id} python3 update_web_terminal.py"
+        f"To update this Box: BOXLITE_RUNTIME={mode} BOXLITE_BOX_ID={box.id} python3 -m webterminal.update"
     )
 
 
