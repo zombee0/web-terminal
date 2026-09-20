@@ -10,6 +10,7 @@ import threading
 import time
 import traceback
 import uuid
+import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -121,6 +122,21 @@ class BoxRunner:
 
     def access_url(self, mode, box_id, host_port=None):
         return service_url(mode, BoxRef(box_id), authenticated=True, host_port=host_port)
+
+    async def terminal_ready(self, url):
+        if not url:
+            return False
+
+        def probe():
+            parsed = urlparse(url)
+            health_url = parsed._replace(path=parsed.path.rstrip("/") + "/healthz").geturl()
+            try:
+                with urllib.request.urlopen(health_url, timeout=2) as response:
+                    return response.status == 200 and response.read(32).strip() == b"ok"
+            except Exception:
+                return False
+
+        return await asyncio.to_thread(probe)
 
 
 class ControlService:
@@ -351,6 +367,12 @@ class ControlService:
             if is_managed_name(item.get("name"))
         }
         boxes = []
+        with self._jobs_lock:
+            preparing = {
+                job["box_id"] for job in self._jobs.values()
+                if job["runtime"] == mode and job["status"] == "running"
+                and job["action"] in {"create", "resume"}
+            }
         for box_id in sorted(box_ids):
             record = inventory.get(box_id, {})
             live_item = live.get(box_id)
@@ -374,6 +396,7 @@ class ControlService:
                     "name": (live_item or {}).get("name") or record.get("name") or box_id,
                     "runtime": mode,
                     "status": status,
+                    "busy": box_id in preparing or status == "starting",
                     "image": (live_item or {}).get("image") or record.get("image") or "",
                     "host_port": host_port,
                     "cpus": (live_item or {}).get("cpus") or record.get("cpus"),
@@ -385,6 +408,16 @@ class ControlService:
                     "tracked": box_id in inventory,
                 }
             )
+        async def check_ready(box):
+            if box["busy"] or box["status"] == "starting":
+                box["status"] = "preparing"
+            elif box["status"] == "running":
+                if not await self.runner.terminal_ready(box["url"]):
+                    box["status"] = "preparing"
+            if box["status"] != "running":
+                box["url"] = None
+
+        await asyncio.gather(*(check_ready(box) for box in boxes))
         return boxes
 
     def create_box(self, mode, name=None, resources=None):

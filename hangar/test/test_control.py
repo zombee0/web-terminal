@@ -1,4 +1,5 @@
 import json
+import asyncio
 import tempfile
 import threading
 import unittest
@@ -41,6 +42,10 @@ class FakeRunner:
         self.stopped = []
         self.resumed = []
         self.deleted = []
+        self.ready = True
+
+    async def terminal_ready(self, url):
+        return bool(url) and self.ready
 
     async def list_info(self, mode):
         return list(self.infos)
@@ -129,6 +134,55 @@ class ControlServiceTest(unittest.TestCase):
         self.assertEqual(len(boxes), 1)
         self.assertEqual(boxes[0]["id"], "boxcloud1")
         self.assertIn("BOXLITE_BOX_AUTH_KEY=secret-token", boxes[0]["url"])
+
+    def test_running_requires_terminal_health(self):
+        self.runner.ready = False
+        boxes = self.service.run(self.service.list_boxes("cloud"))
+        self.assertEqual(boxes[0]["status"], "preparing")
+        self.assertIsNone(boxes[0]["url"])
+
+        self.runner.ready = True
+        boxes = self.service.run(self.service.list_boxes("cloud"))
+        self.assertEqual(boxes[0]["status"], "running")
+        self.assertIsNotNone(boxes[0]["url"])
+        self.runner.infos[0].state = FakeState(False, "stopped")
+        boxes = self.service.run(self.service.list_boxes("cloud"))
+        self.assertEqual(boxes[0]["status"], "stopped")
+        self.assertIsNone(boxes[0]["url"])
+
+    def test_starting_box_is_busy_and_preparing(self):
+        self.runner.infos[0].state = FakeState(False, "starting")
+        boxes = self.service.run(self.service.list_boxes("cloud"))
+        self.assertEqual(boxes[0]["status"], "preparing")
+        self.assertTrue(boxes[0]["busy"])
+        self.assertIsNone(boxes[0]["url"])
+
+    def test_provisioning_stays_preparing_until_completed(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        async def provision(*args, **kwargs):
+            entered.set()
+            while not release.is_set():
+                await asyncio.sleep(0.01)
+            return "http://127.0.0.1:3001"
+
+        self.runner.provision = provision
+        job = self.service.create_box("embedded")
+        try:
+            self.assertTrue(entered.wait(2))
+            boxes = self.service.run(self.service.list_boxes("embedded"))
+            box = next(box for box in boxes if box["id"] == "boxnew1")
+            self.assertEqual(box["status"], "preparing")
+            self.assertTrue(box["busy"])
+            self.assertIsNone(box["url"])
+        finally:
+            release.set()
+            self._wait_job(job["id"])
+        boxes = self.service.run(self.service.list_boxes("embedded"))
+        box = next(box for box in boxes if box["id"] == "boxnew1")
+        self.assertEqual(box["status"], "running")
+        self.assertFalse(box["busy"])
 
     def test_embedded_list_does_not_reuse_default_port(self):
         self.runner.infos = [
@@ -278,6 +332,32 @@ class ParseRuntimeTest(unittest.TestCase):
     def test_aliases(self):
         self.assertEqual(wt.parse_runtime("local"), "embedded")
         self.assertEqual(wt.parse_runtime("REST"), "cloud")
+
+
+class TerminalHealthTest(unittest.TestCase):
+    def test_probe_preserves_auth_query(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.read.return_value = b"ok\n"
+        with mock.patch("hangar.control.urllib.request.urlopen", return_value=response) as request:
+            ready = asyncio.run(control.BoxRunner().terminal_ready(
+                "https://preview.example/terminal?BOXLITE_BOX_AUTH_KEY=test"
+            ))
+        self.assertTrue(ready)
+        self.assertEqual(request.call_args.args[0],
+                         "https://preview.example/terminal/healthz?BOXLITE_BOX_AUTH_KEY=test")
+
+    def test_unreachable_or_nonterminal_endpoint_is_not_ready(self):
+        runner = control.BoxRunner()
+        with mock.patch("hangar.control.urllib.request.urlopen", side_effect=OSError):
+            self.assertFalse(asyncio.run(runner.terminal_ready("http://127.0.0.1:3001")))
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.read.return_value = b"login page"
+        with mock.patch("hangar.control.urllib.request.urlopen", return_value=response):
+            self.assertFalse(asyncio.run(runner.terminal_ready("http://127.0.0.1:3001")))
 
 
 if __name__ == "__main__":

@@ -225,7 +225,7 @@
       font-size: 11px;
     }
     .state.running { color: var(--green); }
-    .state.stopped, .state.stopping, .state.starting { color: var(--amber); }
+    .state.stopped, .state.stopping, .state.starting, .state.preparing { color: var(--amber); }
     .state.missing, .state.error, .state.failed, .state.unknown { color: var(--red); }
     table { width: 100%; table-layout: fixed; border-collapse: collapse; }
     th, td {
@@ -242,8 +242,8 @@
     }
     .col-box { width: 24%; }
     .col-state { width: 132px; padding-right: 28px; }
-    .col-access { width: auto; padding-left: 8px; padding-right: 24px; }
-    .col-ops { width: 318px; text-align: right; }
+    .col-access { width: auto; padding-left: 8px; padding-right: 24px; vertical-align: middle; }
+    .col-ops { width: 318px; text-align: right; vertical-align: middle; }
     .access { min-height: 2.9em; }
     .access-main {
       color: var(--cyan);
@@ -258,7 +258,8 @@
       margin-top: 4px;
     }
     th.col-ops, td.col-ops { text-align: right; }
-    td.col-ops { overflow: hidden; }
+    td.col-ops { overflow: hidden; vertical-align: middle; }
+    td.col-state { vertical-align: middle; }
     .row-actions {
       display: flex;
       flex-wrap: nowrap;
@@ -441,6 +442,38 @@ First provision can take 10-15 minutes.</div>
       };
     }
 
+    const resourceStorageKey = "hangar.resources.v1";
+    const resourceFields = { cpus: "res-cpus", memory_mib: "res-memory", disk_size_gb: "res-disk" };
+
+    function restoreResources() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(resourceStorageKey) || "{}");
+        for (const [key, id] of Object.entries(resourceFields)) {
+          const input = $(id);
+          if (Number.isInteger(saved[key]) && saved[key] >= Number(input.min) && saved[key] <= Number(input.max)) {
+            input.value = saved[key];
+          }
+        }
+      } catch { /* Keep defaults when storage is unavailable or invalid. */ }
+    }
+
+    function saveResources() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(resourceStorageKey) || "{}");
+        for (const [key, id] of Object.entries(resourceFields)) {
+          const input = $(id);
+          if (input.value !== "" && input.checkValidity()) saved[key] = Number(input.value);
+        }
+        localStorage.setItem(resourceStorageKey, JSON.stringify(saved));
+      } catch { toast("RESOURCE SETTINGS COULD NOT BE SAVED"); }
+    }
+
+    restoreResources();
+    for (const id of Object.values(resourceFields)) {
+      $(id).addEventListener("input", saveResources);
+      $(id).addEventListener("change", saveResources);
+    }
+
     function resourceLabel(box) {
       const parts = [];
       if (box.cpus) parts.push(`${box.cpus} CPU`);
@@ -510,7 +543,7 @@ First provision can take 10-15 minutes.</div>
       $("fleet-count").textContent = String(boxes.length);
       const body = boxes.length
         ? boxes.map((box) => {
-            const busy = box.status === "starting" || box.status === "stopping";
+            const busy = box.busy || box.status === "starting" || box.status === "stopping";
             return `<tr>
               <td class="col-box"><code>${escapeHtml(box.id)}</code><div class="hint" style="margin:4px 0 0">${escapeHtml(box.name)}</div><div class="hint" style="margin:2px 0 0">${escapeHtml(resourceLabel(box))}</div></td>
               <td class="col-state"><span class="state ${escapeHtml(box.status)}">${escapeHtml((box.status || "unknown").toUpperCase())}</span></td>

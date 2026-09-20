@@ -250,6 +250,10 @@ def cloud_api(method, path, payload=None, timeout=30):
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode() or "{}")
     except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            raise RuntimeError(
+                "BoxLite API rejected BOXLITE_API_KEY (HTTP 401); configure a valid key and restart the control platform"
+            ) from exc
         raise RuntimeError(f"BoxLite API {method} {path} failed with HTTP {exc.code}") from exc
 
 
