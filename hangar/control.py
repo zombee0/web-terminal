@@ -21,7 +21,6 @@ from hangar.boxlite import (
     create_runtime,
     delete_box,
     ensure_stopped,
-    is_managed_name,
     load_cloud_credentials,
     next_host_port,
     normalize_status,
@@ -361,11 +360,9 @@ class ControlService:
             if not inventory:
                 raise RuntimeError(f"Failed to list {mode} boxes: {exc}") from exc
 
-        box_ids = set(inventory) | {
-            box_id
-            for box_id, item in live.items()
-            if is_managed_name(item.get("name"))
-        }
+        # The local state file is the ownership registry. Names are user-editable
+        # and cannot prove that a remote Box belongs to this HANGAR instance.
+        box_ids = set(inventory)
         boxes = []
         with self._jobs_lock:
             preparing = {

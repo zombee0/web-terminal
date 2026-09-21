@@ -58,8 +58,8 @@ if [ -f /etc/locale.gen ]; then
   locale-gen zh_CN.UTF-8
 fi
 
-curl -fsSL https://chatgpt.com/codex/install.sh -o /tmp/install-codex.sh
-su -s /bin/bash boxlite -c \
+curl --connect-timeout 10 --max-time 60 -fsSL https://chatgpt.com/codex/install.sh -o /tmp/install-codex.sh
+timeout 180s su -s /bin/bash boxlite -c \
   'HOME=/home/boxlite PATH=/home/boxlite/.local/bin:/usr/local/bin:/usr/bin:/bin CODEX_NON_INTERACTIVE=1 sh /tmp/install-codex.sh'
 rm -f /tmp/install-codex.sh
 
@@ -86,12 +86,14 @@ install -d -o boxlite -g boxlite \
 chown -R boxlite:boxlite /home/boxlite/.local
 BOXLITE_ENV='HOME=/home/boxlite PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin'
 
+if ! su -s /bin/bash boxlite -c \
+  'HOME=/home/boxlite PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin sh -c "curl -fsSL https://claude.ai/install.sh | bash"'; then
+  echo "WARNING: Claude Code installation failed; continuing without claude" >&2
+fi
 su -s /bin/bash boxlite -c \
-  'HOME=/home/boxlite PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin sh -c "curl -fsSL https://claude.ai/install.sh | bash"'
-su -s /bin/bash boxlite -c \
-  'HOME=/home/boxlite PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin sh -c "curl -fsS https://cursor.com/install | bash"'
+  'HOME=/home/boxlite PATH=/home/boxlite/.local/bin:/home/boxlite/.npm-global/bin:/usr/local/bin:/usr/bin:/bin sh -c "curl --connect-timeout 10 --max-time 180 -fsS https://cursor.com/install | bash"'
 
-su -s /bin/bash boxlite -c "$BOXLITE_ENV claude --version"
+if su -s /bin/bash boxlite -c "$BOXLITE_ENV claude --version"; then :; else echo "WARNING: claude is unavailable" >&2; fi
 su -s /bin/bash boxlite -c "$BOXLITE_ENV agent --version"
 """
 
@@ -103,6 +105,7 @@ su -s /bin/bash boxlite -c "$BOXLITE_ENV command -v agent >/dev/null"
 su -s /bin/bash boxlite -c "$BOXLITE_ENV claude --version"
 su -s /bin/bash boxlite -c "$BOXLITE_ENV agent --version"
 """
+
 
 INSTALL_APP_COMMAND = r"""
 set -eu

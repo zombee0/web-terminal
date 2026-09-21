@@ -272,6 +272,9 @@
       letter-spacing: 0.04em;
     }
     #fleet { min-height: 168px; }
+    .loading { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 168px; color: var(--muted); letter-spacing: 0.12em; font-size: 11px; }
+    .spinner { width: 14px; height: 14px; border: 2px solid #1d4c3b; border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .empty {
       padding: 28px 14px;
       color: var(--muted);
@@ -402,7 +405,7 @@ First provision can take 10-15 minutes.</div>
   </div>
 
   <script>
-    const state = { runtime: "embedded", jobId: null, pendingDelete: null };
+    const state = { runtime: "embedded", jobId: null, pendingDelete: null, refreshToken: 0 };
 
     const $ = (id) => document.getElementById(id);
     const consoleEl = $("console");
@@ -519,6 +522,7 @@ First provision can take 10-15 minutes.</div>
 
     function setRuntime(runtime) {
       state.runtime = runtime;
+      renderLoading();
       $("btn-cloud").classList.toggle("active", runtime === "cloud");
       $("btn-local").classList.toggle("active", runtime === "embedded");
       $("target-hint").textContent = runtime === "cloud"
@@ -567,11 +571,21 @@ First provision can take 10-15 minutes.</div>
       $("fleet")._boxes = Object.fromEntries(boxes.map((box) => [box.id, box]));
     }
 
+    function renderLoading() {
+      $("fleet-count").textContent = "…";
+      $("fleet")._boxes = {};
+      $("fleet").innerHTML = `<div class="loading"><span class="spinner" aria-hidden="true"></span><span>LOADING ${state.runtime === "cloud" ? "CLOUD" : "LOCAL"} BOXES</span></div>`;
+    }
+
     async function refreshBoxes() {
+      const runtime = state.runtime;
+      const requestToken = ++state.refreshToken;
       try {
-        const data = await api(`/api/boxes?runtime=${encodeURIComponent(state.runtime)}`);
+        const data = await api(`/api/boxes?runtime=${encodeURIComponent(runtime)}`);
+        if (state.runtime !== runtime || state.refreshToken !== requestToken) return;
         renderBoxes(data.boxes || []);
       } catch (error) {
+        if (state.runtime !== runtime || state.refreshToken !== requestToken) return;
         $("fleet").innerHTML = `<div class="empty bad">${escapeHtml(error.message)}</div>`;
         $("fleet-count").textContent = "0";
       }

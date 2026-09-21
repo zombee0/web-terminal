@@ -130,12 +130,21 @@ class ControlServiceTest(unittest.TestCase):
         self.assertIsNone(self.service.record_for("boxcloud1"))
 
     def test_list_includes_access_url(self):
+        self.service.upsert_record(
+            {"id": "boxcloud1", "name": "web-terminal-demo", "runtime": "cloud"}
+        )
         boxes = self.service.run(self.service.list_boxes("cloud"))
         self.assertEqual(len(boxes), 1)
         self.assertEqual(boxes[0]["id"], "boxcloud1")
         self.assertIn("BOXLITE_BOX_AUTH_KEY=secret-token", boxes[0]["url"])
 
+    def test_untracked_remote_box_is_hidden_even_with_managed_name(self):
+        self.runner.infos.append(FakeInfo("boxcloud2", "web-terminal-other"))
+        boxes = self.service.run(self.service.list_boxes("cloud"))
+        self.assertEqual([box["id"] for box in boxes], [])
+
     def test_running_requires_terminal_health(self):
+        self.service.upsert_record({"id": "boxcloud1", "runtime": "cloud"})
         self.runner.ready = False
         boxes = self.service.run(self.service.list_boxes("cloud"))
         self.assertEqual(boxes[0]["status"], "preparing")
@@ -151,6 +160,7 @@ class ControlServiceTest(unittest.TestCase):
         self.assertIsNone(boxes[0]["url"])
 
     def test_starting_box_is_busy_and_preparing(self):
+        self.service.upsert_record({"id": "boxcloud1", "runtime": "cloud"})
         self.runner.infos[0].state = FakeState(False, "starting")
         boxes = self.service.run(self.service.list_boxes("cloud"))
         self.assertEqual(boxes[0]["status"], "preparing")
@@ -200,8 +210,7 @@ class ControlServiceTest(unittest.TestCase):
         boxes = self.service.run(self.service.list_boxes("embedded"))
         by_id = {box["id"]: box for box in boxes}
         self.assertEqual(by_id["newbox"]["host_port"], 3002)
-        self.assertIsNone(by_id["oldbox"]["host_port"])
-        self.assertIsNone(by_id["oldbox"]["url"])
+        self.assertNotIn("oldbox", by_id)
 
     def test_create_stop_resume_delete(self):
         job = self.service.create_box("embedded", "web-terminal-local")
@@ -311,6 +320,9 @@ class ControlHttpTest(unittest.TestCase):
         self.assertIn('id="res-disk"', html)
 
     def test_status_and_list(self):
+        self.service.upsert_record(
+            {"id": "boxcloud1", "runtime": "cloud", "name": "web-terminal-demo"}
+        )
         status, body = self.fetch("/api/status")
         self.assertEqual(status, 200)
         payload = json.loads(body)
