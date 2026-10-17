@@ -69,6 +69,17 @@ class HostPortTest(unittest.TestCase):
 
 
 class ServiceUrlTest(unittest.TestCase):
+    def test_cloud_uses_tunnel_and_preserves_private_box_fallback(self):
+        box = mock.Mock(id="example")
+        with mock.patch("hangar.boxlite.cloud_tunnel_url", return_value="https://tunnel.invalid"):
+            self.assertEqual(wt.service_url("cloud", box), "https://tunnel.invalid")
+        with mock.patch("hangar.boxlite.cloud_tunnel_url", side_effect=wt.CloudAPIError(409)):
+            with mock.patch("hangar.boxlite.cloud_api", return_value={"url": "https://legacy.invalid", "token": "test"}):
+                self.assertIn("BOXLITE_BOX_AUTH_KEY=test", wt.service_url("cloud", box))
+        with mock.patch("hangar.boxlite.cloud_tunnel_url", side_effect=wt.CloudAPIError(403)):
+            with self.assertRaises(wt.CloudAPIError):
+                wt.service_url("cloud", box)
+
     def test_embedded_uses_loopback(self):
         with mock.patch.dict(os.environ, {"BOXLITE_HOST_PORT": "4010"}):
             self.assertEqual(wt.service_url("embedded", object()), "http://127.0.0.1:4010")

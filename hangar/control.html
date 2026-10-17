@@ -212,7 +212,7 @@
       border-color: var(--red);
       color: var(--red);
     }
-    .actions button:disabled, .row-actions button:disabled {
+    .runtime button:disabled, .actions button:disabled, .row-actions button:disabled {
       opacity: 0.4;
       cursor: not-allowed;
     }
@@ -405,7 +405,9 @@ First provision can take 10-15 minutes.</div>
   </div>
 
   <script>
+    const capabilities = window.HANGAR_CAPABILITIES || {};
     const state = { runtime: "embedded", jobId: null, pendingDelete: null, refreshToken: 0 };
+    if (capabilities.defaultRuntime) state.runtime = capabilities.defaultRuntime;
 
     const $ = (id) => document.getElementById(id);
     const consoleEl = $("console");
@@ -471,7 +473,12 @@ First provision can take 10-15 minutes.</div>
       } catch { toast("RESOURCE SETTINGS COULD NOT BE SAVED"); }
     }
 
-    restoreResources();
+    if (capabilities.fixedResources) {
+      for (const [key, id] of Object.entries(resourceFields)) {
+        $(id).value = capabilities.fixedResources[key];
+        $(id).disabled = true;
+      }
+    } else restoreResources();
     for (const id of Object.values(resourceFields)) {
       $(id).addEventListener("input", saveResources);
       $(id).addEventListener("change", saveResources);
@@ -509,7 +516,7 @@ First provision can take 10-15 minutes.</div>
 
     async function api(path, options) {
       const response = await fetch(path, Object.assign({
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json", ...(window.HANGAR_HOSTED?.headers(options?.method) || {}) }
       }, options));
       const text = await response.text();
       let data = {};
@@ -521,13 +528,14 @@ First provision can take 10-15 minutes.</div>
     }
 
     function setRuntime(runtime) {
+      if (capabilities.disableLocal && runtime !== "cloud") return;
       state.runtime = runtime;
       renderLoading();
       $("btn-cloud").classList.toggle("active", runtime === "cloud");
       $("btn-local").classList.toggle("active", runtime === "embedded");
-      $("target-hint").textContent = runtime === "cloud"
+      $("target-hint").textContent = capabilities.hint || (runtime === "cloud"
         ? "Access uses an authed preview URL with a box token.\nFirst provision can take 10-15 minutes."
-        : "Access uses a loopback URL on an allocated port.\nFirst provision can take 10-15 minutes.";
+        : "Access uses a loopback URL on an allocated port.\nFirst provision can take 10-15 minutes.");
       refreshBoxes();
     }
 
@@ -544,6 +552,7 @@ First provision can take 10-15 minutes.</div>
     }
 
     function renderBoxes(boxes) {
+      window.HANGAR_HOSTED?.boxesChanged(boxes);
       $("fleet-count").textContent = String(boxes.length);
       const body = boxes.length
         ? boxes.map((box) => {
@@ -551,11 +560,11 @@ First provision can take 10-15 minutes.</div>
             return `<tr>
               <td class="col-box"><code>${escapeHtml(box.id)}</code><div class="hint" style="margin:4px 0 0">${escapeHtml(box.name)}</div><div class="hint" style="margin:2px 0 0">${escapeHtml(resourceLabel(box))}</div></td>
               <td class="col-state"><span class="state ${escapeHtml(box.status)}">${escapeHtml((box.status || "unknown").toUpperCase())}</span></td>
-              <td class="col-access">${formatAccess(box.url)}</td>
+              <td class="col-access">${capabilities.authenticatedAccess ? '<div class="access"><div class="access-main">SIGN-IN REQUIRED</div><div class="access-meta">OWNER ACCESS ONLY</div></div>' : formatAccess(box.url)}</td>
               <td class="col-ops">
                 <div class="row-actions">
-                  <button data-act="open" data-id="${escapeHtml(box.id)}" ${box.url ? "" : "disabled"}>OPEN</button>
-                  <button data-act="copy" data-id="${escapeHtml(box.id)}" ${box.url ? "" : "disabled"}>COPY</button>
+                  <button data-act="open" data-id="${escapeHtml(box.id)}" ${(capabilities.authenticatedAccess ? box.access_url && box.status === "running" && !busy : box.url && !capabilities.disableDirectAccess) ? "" : "disabled"}>OPEN</button>
+                  <button data-act="copy" data-id="${escapeHtml(box.id)}" ${(capabilities.authenticatedAccess ? box.access_url : box.url && !capabilities.disableDirectAccess) ? "" : "disabled"}>COPY</button>
                   <button data-act="stop" data-id="${escapeHtml(box.id)}" ${box.status === "running" && !busy ? "" : "disabled"}>STOP</button>
                   <button class="primary" data-act="resume" data-id="${escapeHtml(box.id)}" ${box.status !== "running" && !busy ? "" : "disabled"}>RESUME</button>
                   <button class="danger" data-act="delete" data-id="${escapeHtml(box.id)}">DELETE</button>
@@ -642,6 +651,12 @@ First provision can take 10-15 minutes.</div>
       const box = ($("fleet")._boxes || {})[button.dataset.id];
       if (!box) return;
       try {
+        if (capabilities.authenticatedAccess && ["open", "copy"].includes(button.dataset.act)) {
+          if (button.dataset.act === "open") window.open(box.access_url, "_blank", "noopener");
+          else { await navigator.clipboard.writeText(new URL(box.access_url, location.origin).href); toast("AUTHENTICATED ACCESS URL COPIED"); }
+          return;
+        }
+        if (capabilities.disableDirectAccess && ["open", "copy"].includes(button.dataset.act)) return;
         if (button.dataset.act === "open") {
           window.open(box.url, "_blank", "noopener");
           return;
@@ -690,6 +705,13 @@ First provision can take 10-15 minutes.</div>
     });
 
     (async function init() {
+      if (capabilities.disableLocal) $("btn-local").disabled = true;
+      if (capabilities.hint) $("target-hint").textContent = capabilities.hint;
+      if (window.HANGAR_HOSTED) {
+        $("btn-create").disabled = true;
+        try { await window.HANGAR_HOSTED.initialize(); }
+        catch { log("// authentication is temporarily unavailable"); }
+      }
       await refreshStatus();
       await refreshBoxes();
     })();

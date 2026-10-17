@@ -11,3 +11,5 @@ __pycache__/
 *.pem
 *.key
 .web-terminal/
+/supabase/deployment.json
+/.agents/state/

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HANGAR // Admin</title>
+  <style>
+    :root { color-scheme: dark; --bg:#020508; --panel:#07110f; --line:#19362c; --text:#d5f6e2; --muted:#8da99a; --green:#3dff9a; --cyan:#5ce1e6; --amber:#ffb020; --red:#ff7892; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(ellipse at top left,#0b2017 0,transparent 50%),var(--bg); color:var(--text); font:13px/1.6 ui-monospace,Menlo,Consolas,monospace; }
+    a { color:var(--cyan); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    button,input,select { font:inherit; }
+    button,select,input { color:var(--text); border:1px solid var(--line); background:#06140f; padding:9px 12px; }
+    button { cursor:pointer; }
+    button:hover:not(:disabled) { border-color:var(--green); }
+    button:disabled { opacity:.4; cursor:not-allowed; }
+    :focus-visible { outline:2px solid var(--green); outline-offset:3px; }
+    [hidden] { display:none !important; }
+    .wrap { max-width:1380px; padding:28px 24px 40px; margin:auto; }
+    header { display:flex; justify-content:space-between; align-items:center; gap:24px; padding-bottom:20px; border-bottom:1px solid var(--line); }
+    h1 { color:var(--green); font-size:25px; font-weight:500; letter-spacing:.04em; margin:0; }
+    h1 span { color:var(--cyan); }
+    .eyebrow { color:var(--muted); font-size:10px; letter-spacing:.16em; margin:4px 0 0; }
+    .account { text-align:right; min-width:0; }
+    #viewer { display:block; max-width:360px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:11px; color:var(--muted); margin-top:5px; }
+    .heading { display:flex; justify-content:space-between; align-items:center; gap:16px; margin:28px 0 16px; }
+    h2 { font-size:13px; color:var(--cyan); font-weight:500; letter-spacing:.12em; margin:0; }
+    .refresh { display:flex; align-items:center; gap:14px; }
+    #updated { font-size:10px; color:var(--muted); }
+    .cards { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+    .card { border:1px solid var(--line); background:var(--panel); padding:18px 20px; }
+    .label { color:var(--muted); font-size:10px; letter-spacing:.09em; }
+    .number { font-size:34px; line-height:1.4; margin:6px 0; color:var(--green); font-weight:400; }
+    .detail { font-size:11px; color:var(--muted); min-height:18px; }
+    .health { display:flex; flex-wrap:wrap; gap:10px 28px; border:1px solid var(--line); padding:12px 16px; margin:12px 0 24px; font-size:11px; color:var(--muted); }
+    .health b { color:var(--text); font-weight:400; }
+    .panel { border:1px solid var(--line); background:var(--panel); }
+    .toolbar { display:flex; gap:12px; padding:16px; }
+    .search { flex:1; max-width:500px; min-width:0; }
+    input { width:100%; }
+    .table-scroll { overflow:auto; }
+    table { border-collapse:collapse; width:100%; min-width:850px; text-align:left; font-size:12px; }
+    th { color:var(--muted); font-weight:400; letter-spacing:.08em; font-size:10px; white-space:nowrap; background:#081710; }
+    th,td { border-bottom:1px solid var(--line); padding:13px 16px; vertical-align:top; }
+    td { max-width:320px; overflow-wrap:anywhere; }
+    td small { display:block; font-size:10px; color:var(--muted); margin-top:3px; }
+    .badge { display:inline-block; white-space:nowrap; border:1px solid var(--line); padding:2px 7px; font-size:10px; letter-spacing:.04em; }
+    .badge.good { color:var(--green); border-color:#215438; }
+    .badge.warn { color:var(--amber); border-color:#664319; }
+    .badge.bad { color:var(--red); border-color:#683143; }
+    .badge.muted { color:var(--muted); }
+    .empty { text-align:center; color:var(--muted); padding:44px 16px; }
+    .pagination { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 16px; color:var(--muted); font-size:11px; }
+    .pagination div { display:flex; gap:8px; }
+    #message { color:var(--amber); padding:12px 0; margin:0; }
+    #reauth { display:inline-block; margin:10px 0 20px; }
+    #membership { margin-top:28px; }
+    .hint { color:var(--muted); margin:0; padding:0 16px 14px; font-size:11px; }
+    #role-message { padding:0 16px; color:var(--amber); overflow-wrap:anywhere; }
+    #candidate { padding:0 16px 16px; }
+    .role-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    #member-records { min-width:660px; }
+    #role-history { min-width:760px; }
+    footer { color:var(--muted); font-size:10px; margin-top:18px; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    @media(max-width:850px) { .cards { grid-template-columns:repeat(2,minmax(0,1fr)); } header { align-items:flex-start; } h1 { font-size:21px; } #viewer { max-width:220px; } }
+    @media(max-width:520px) { .wrap { padding:20px 14px; } header { flex-direction:column; gap:12px; } .account { text-align:left; } #viewer { max-width:100%; } .heading { align-items:flex-start; } .refresh { align-items:flex-end; flex-direction:column-reverse; gap:4px; } .card { padding:14px; } .number { font-size:28px; } .toolbar { flex-direction:column; } .pagination { flex-wrap:wrap; } }
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <div><h1>HANGAR <span>//</span> ADMIN</h1><p class="eyebrow">SUPABASE · BOX USAGE</p></div>
+    <div class="account"><a href="/">← MY FLEET</a><span id="viewer"></span></div>
+  </header>
+  <div class="heading"><h2>BOX OVERVIEW</h2><div class="refresh"><span id="updated">Loading…</span><button id="refresh" type="button">REFRESH</button></div></div>
+  <p id="message" role="status" aria-live="polite" hidden></p>
+  <a id="reauth" href="/auth/login?next=%2Fadmin%2F" hidden>SIGN IN WITH GOOGLE →</a>
+  <section class="cards" aria-label="System totals">
+    <article class="card"><div class="label">CURRENT BOXES</div><div class="number" id="boxes">—</div><div class="detail">Includes stopped and pending</div></article>
+    <article class="card"><div class="label">RUNNING BOXES</div><div class="number" id="running">—</div><div class="detail">Currently running</div></article>
+    <article class="card"><div class="label">STOPPED BOXES</div><div class="number" id="stopped">—</div><div class="detail">Still occupy the owner’s quota</div></article>
+    <article class="card"><div class="label">BOX ERRORS</div><div class="number" id="errors">—</div><div class="detail">Require owner attention</div></article>
+  </section>
+  <div class="health"><span>ALLOCATED <b id="allocation">—</b></span><span>DELETED, ALL TIME <b id="deleted">—</b></span></div>
+  <section class="panel" aria-label="Global records">
+    <div class="toolbar"><h2>USER BOXES</h2></div>
+    <div class="toolbar">
+      <label class="search"><span class="sr-only">Search records</span><input id="search" type="search" maxlength="120" placeholder="Search owner, name or ID…" autocomplete="off"></label>
+      <label><span class="sr-only">Filter status</span><select id="status"><option value="">All statuses</option></select></label>
+    </div>
+    <div class="table-scroll"><table aria-label="Boxes" id="records"><thead></thead><tbody><tr><td class="empty">Loading…</td></tr></tbody></table></div>
+    <div class="pagination"><span id="page-label" aria-live="polite">—</span><div><button id="previous" type="button" disabled>← PREVIOUS</button><button id="next" type="button" disabled>NEXT →</button></div></div>
+  </section>
+  <section id="membership" class="panel" aria-label="Administrator management" hidden>
+    <div class="toolbar"><h2>ADMINISTRATORS</h2></div>
+    <p class="hint">Site owners manage access here. Administrators can only view Box usage; no role grants access to another user's terminal.</p>
+    <form id="member-search" class="toolbar">
+      <label class="search"><span class="sr-only">Verified Google email</span><input id="member-email" type="email" required maxlength="254" placeholder="Google email of an existing user" autocomplete="off"></label>
+      <button type="submit">FIND USER</button>
+    </form>
+    <p id="role-message" role="status" aria-live="polite"></p>
+    <div id="candidate" hidden></div>
+    <div class="table-scroll"><table id="member-records" aria-label="Administrators"><thead><tr><th>USER</th><th>ROLE</th><th>UPDATED</th><th>CHANGE ACCESS</th></tr></thead><tbody></tbody></table></div>
+    <div class="toolbar"><h2>ACCESS HISTORY</h2></div>
+    <div class="table-scroll"><table id="role-history" aria-label="Access history"><thead><tr><th>TIME</th><th>CHANGED BY</th><th>USER</th><th>CHANGE</th></tr></thead><tbody></tbody></table></div>
+    <div class="pagination"><span id="history-page" aria-live="polite">—</span><div><button id="history-previous" type="button" disabled>← PREVIOUS</button><button id="history-next" type="button" disabled>NEXT →</button></div></div>
+  </section>
+  <footer>READ-ONLY OVERVIEW · Refreshes every 30 seconds · Times shown in your local timezone · Allocation is configured capacity for current user Boxes.</footer>
+</main>
+<script src="/admin.js"></script>
+</body>
+</html>

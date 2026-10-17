@@ -1,5 +1,7 @@
 """Provision and restart Web Terminal inside a BoxLite sandbox."""
 
+import asyncio
+import json
 import os
 import pathlib
 import re
@@ -106,6 +108,36 @@ su -s /bin/bash boxlite -c "$BOXLITE_ENV claude --version"
 su -s /bin/bash boxlite -c "$BOXLITE_ENV agent --version"
 """
 
+# This is the container's root PID 1 in protected deployments. Keeping the
+# listening socket here makes service-child failure fail closed; an unprivileged
+# terminal cannot replace the authenticated listener while it restarts.
+PROTECTED_INIT = r"""
+import os,pathlib,signal,socket,subprocess,time
+listener=socket.socket()
+listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+listener.bind(('0.0.0.0',3001))
+listener.listen(128)
+pathlib.Path('/run/web-terminal-supervised').touch(mode=0o600)
+child=None
+stopping=False
+def stop(signum,frame):
+    global stopping
+    stopping=True
+    if child is not None: child.terminate()
+signal.signal(signal.SIGTERM,stop)
+signal.signal(signal.SIGINT,stop)
+while not stopping:
+    if not os.path.isfile('/etc/web-terminal/gateway.json') or not os.path.isfile('/usr/local/bin/web-terminal'):
+        time.sleep(1)
+        continue
+    child=subprocess.Popen(['/usr/local/bin/web-terminal'],cwd='/home/boxlite',
+        env={'PATH':'/usr/local/bin:/usr/bin:/bin','WEB_TERMINAL_GATEWAY_CONFIG':'/etc/web-terminal/gateway.json',
+             'WEB_TERMINAL_LISTEN_FD':str(listener.fileno())},pass_fds=(listener.fileno(),),
+        stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    child.wait()
+    if not stopping: time.sleep(1)
+"""
+
 
 INSTALL_APP_COMMAND = r"""
 set -eu
@@ -151,7 +183,7 @@ def _emit(log, message):
     log(text)
 
 
-async def create_managed_box(runtime, mode, *, name=None, host_port=None, resources=None, log=None):
+async def create_managed_box(runtime, mode, *, name=None, host_port=None, resources=None, log=None, inbound=True):
     box_name = new_box_name(name or os.environ.get("BOXLITE_BOX_NAME"))
     spec = parse_resources(resources)
     _emit(
@@ -159,7 +191,7 @@ async def create_managed_box(runtime, mode, *, name=None, host_port=None, resour
         f"creating box name={box_name} cpus={spec['cpus']} memory_mib={spec['memory_mib']} disk_size_gb={spec['disk_size_gb']}",
     )
     if mode == "cloud":
-        box_id, box_name = create_cloud_box(box_name, spec)
+        box_id, box_name = await asyncio.to_thread(create_cloud_box, box_name, spec, inbound=inbound)
         box = await runtime.get(box_id)
         if box is None:
             raise RuntimeError(f"Cloud box created but not readable: {box_id}")
@@ -200,12 +232,40 @@ async def install_agent_clis(box, mode, *, log=None):
         "sh",
         args=["-lc", INSTALL_AGENT_CLIS_COMMAND],
         user="root",
-        timeout_secs=120,
+        timeout_secs=600,
         log=log,
     )
 
 
-async def install_web_terminal(box, mode, *, log=None):
+def protected_start_command():
+    return r"""
+set -eu
+test "$(id -u)" -eq 0
+test -f /etc/web-terminal/gateway.json
+test -x /usr/bin/setpriv
+pkill -u root -f '^/usr/local/bin/web-terminal$' || true
+if [ -f /run/web-terminal-supervised ]; then exit 0; fi
+install -m 0600 /dev/null /var/log/web-terminal.log
+cd /home/boxlite
+env -i PATH=/usr/local/bin:/usr/bin:/bin WEB_TERMINAL_GATEWAY_CONFIG=/etc/web-terminal/gateway.json \
+  setsid -f /usr/local/bin/web-terminal >/var/log/web-terminal.log 2>&1 </dev/null
+"""
+
+
+async def install_web_terminal(box, mode, *, log=None, gateway_config=None):
+    if gateway_config is not None:
+        await box.copy_in(str(app_path(mode)), "/root/.web-terminal-upload")
+        config = shlex.quote(json.dumps(gateway_config, separators=(",", ":")))
+        command = (
+            "set -eu\ninstall -d -m 0755 -o root -g root /etc/web-terminal\n"
+            "install -m 0755 -o root -g root /root/.web-terminal-upload /usr/local/bin/web-terminal\n"
+            "rm -f /root/.web-terminal-upload\n"
+            f"printf '%s' {config} > /etc/web-terminal/gateway.json\n"
+            "chown root:root /etc/web-terminal/gateway.json\nchmod 0600 /etc/web-terminal/gateway.json\n"
+            + protected_start_command()
+        )
+        await run_checked(box, "sh", args=["-lc", command], user="root", timeout_secs=60, log=log)
+        return
     await box.copy_in(str(app_path(mode)), "/home/boxlite/.web-terminal-upload")
     await run_checked(
         box,
@@ -217,7 +277,7 @@ async def install_web_terminal(box, mode, *, log=None):
     )
 
 
-async def provision_web_terminal(runtime, box, mode, *, host_port=None, log=None):
+async def provision_web_terminal(runtime, box, mode, *, host_port=None, log=None, gateway_config=None, publish_url=True):
     _emit(log, "starting box")
     await ensure_started(runtime, box, mode)
     _emit(log, "bootstrapping guest packages")
@@ -247,11 +307,11 @@ async def provision_web_terminal(runtime, box, mode, *, host_port=None, log=None
     )
     await install_agent_clis(box, mode, log=log)
     _emit(log, "installing web-terminal")
-    await install_web_terminal(box, mode, log=log)
+    await install_web_terminal(box, mode, log=log, gateway_config=gateway_config)
     _emit(log, "waiting for guest /healthz")
     await wait_for_guest_health(box, attempts=60, timeout_secs=90, log=log)
-    url = service_url(mode, box, authenticated=True, host_port=host_port)
-    if mode == "embedded":
+    url = service_url(mode, box, authenticated=True, host_port=host_port) if publish_url else None
+    if mode == "embedded" and url:
         await wait_for_host_health(url.rstrip("/") + "/healthz")
     _emit(log, "provision complete")
     return url
@@ -267,14 +327,16 @@ async def resume_web_terminal(
     reinstall=False,
     authenticated=True,
     install_clis=True,
+    gateway_config=None,
+    publish_url=True,
 ):
     _emit(log, "resuming box")
     await ensure_started(runtime, box, mode)
     if install_clis:
         await install_agent_clis(box, mode, log=log)
-    if reinstall:
+    if reinstall or gateway_config is not None:
         _emit(log, "reinstalling web-terminal")
-        await install_web_terminal(box, mode, log=log)
+        await install_web_terminal(box, mode, log=log, gateway_config=gateway_config)
     else:
         _emit(log, "starting web-terminal")
         try:
@@ -297,10 +359,12 @@ async def resume_web_terminal(
                 reinstall=True,
                 authenticated=authenticated,
                 install_clis=False,
+                gateway_config=gateway_config,
+                publish_url=publish_url,
             )
     await wait_for_guest_health(box, attempts=30, timeout_secs=60, log=log)
-    url = service_url(mode, box, authenticated=authenticated, host_port=host_port)
-    if mode == "embedded":
+    url = service_url(mode, box, authenticated=authenticated, host_port=host_port) if publish_url else None
+    if mode == "embedded" and url:
         await wait_for_host_health(url.rstrip("/") + "/healthz")
     _emit(log, "resume complete")
     return url

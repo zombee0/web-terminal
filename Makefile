@@ -1,0 +1,36 @@
+PYTHON ?= .venv/bin/python
+GO ?= go
+
+.PHONY: test test-python test-go test-supabase test-supabase-db test-supabase-live test-supabase-recovery test-supabase-admin-live test-supabase-ui build bootstrap
+test: test-python test-go test-supabase
+
+test-python:
+	$(PYTHON) -m unittest discover -s hangar/test -v
+
+test-go:
+	$(GO) -C go test -race ./...
+
+test-supabase:
+	$(PYTHON) -m unittest discover -s supabase/tests -v
+
+test-supabase-db:
+	WT_TEST_DATABASE=1 $(PYTHON) -m unittest discover -s supabase/tests -v
+
+test-supabase-live:
+	$(PYTHON) -m supabase.live_check
+
+test-supabase-recovery:
+	$(PYTHON) -m supabase.recovery_check
+
+test-supabase-admin-live:
+	$(PYTHON) -m supabase.admin_check
+
+test-supabase-ui:
+	PYTHONPATH=. $(PYTHON) supabase/tests/admin_ui_check.py
+	PYTHONPATH=. $(PYTHON) supabase/tests/hosted_ui_check.py
+
+build:
+	bash scripts/build_web_terminal_binary.sh
+
+bootstrap:
+	bash scripts/bootstrap_host.sh

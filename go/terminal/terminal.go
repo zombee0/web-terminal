@@ -54,8 +54,9 @@ func Environment() []string {
 }
 
 func PageHTML() string {
+	source := strings.Replace(terminalPage, `+location.host+'/ws'+location.search`, `+location.host+location.pathname.replace(/\/?$/, '/')+'ws'+location.search`, 1)
 	page := strings.Replace(
-		terminalPage,
+		source,
 		`const unicodeAddon=new Unicode11Addon.Unicode11Addon();term.loadAddon(fitAddon);term.loadAddon(unicodeAddon);term.unicode.activeVersion='11';`,
 		`term.loadAddon(fitAddon);if(window.Unicode11Addon){try{const unicodeAddon=new Unicode11Addon.Unicode11Addon();term.loadAddon(unicodeAddon);term.unicode.activeVersion='11'}catch(error){console.warn('Unicode addon disabled',error)}}`,
 		1,
@@ -76,6 +77,10 @@ func sendBinary(conn *websocket.Conn, mu *sync.Mutex, payload []byte) error {
 }
 
 func HandleWS(w http.ResponseWriter, r *http.Request) {
+	handleWS(w, r, nil)
+}
+
+func handleWS(w http.ResponseWriter, r *http.Request, identity *Identity) {
 	conn, err := Upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ws upgrade failed remote=%s error=%v", r.RemoteAddr, err)
@@ -83,7 +88,11 @@ func HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	remote := r.RemoteAddr
-	log.Printf("ws opened remote=%s path=%s origin=%q extensions=%q", remote, r.URL.Path, r.Header.Get("Origin"), r.Header.Get("Sec-WebSocket-Extensions"))
+	if identity == nil {
+		log.Printf("ws opened remote=%s path=%s origin=%q extensions=%q", remote, r.URL.Path, r.Header.Get("Origin"), r.Header.Get("Sec-WebSocket-Extensions"))
+	} else {
+		log.Print("protected terminal connected")
+	}
 	conn.SetReadLimit(4 * 1024 * 1024)
 	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetPongHandler(func(string) error {
@@ -97,6 +106,13 @@ func HandleWS(w http.ResponseWriter, r *http.Request) {
 	command := exec.Command(shell, "-i")
 	command.Dir = "/home/boxlite"
 	command.Env = Environment()
+	if identity != nil {
+		command.Env = ProtectedEnvironment()
+		if err := protectCommand(command, *identity); err != nil {
+			log.Print("protected terminal startup failed")
+			return
+		}
+	}
 	ptmx, err := pty.Start(command)
 	if err != nil {
 		log.Printf("pty start failed remote=%s error=%v", remote, err)
@@ -183,6 +199,10 @@ func HandleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func Handler() http.Handler {
+	return handler(nil)
+}
+
+func handler(identity *Identity) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -195,7 +215,7 @@ func Handler() http.Handler {
 			return
 		}
 		if r.URL.Path == "/ws" {
-			HandleWS(w, r)
+			handleWS(w, r, identity)
 			return
 		}
 		http.NotFound(w, r)

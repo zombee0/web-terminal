@@ -209,7 +209,7 @@ def create_box_options(mode, host_port=None, resources=None):
     return BoxOptions(**kwargs)
 
 
-def cloud_create_payload(name, resources=None):
+def cloud_create_payload(name, resources=None, *, inbound=True):
     spec = parse_resources(resources)
     return {
         "name": name,
@@ -223,18 +223,27 @@ def cloud_create_payload(name, resources=None):
         "user": "root",
         "detach": True,
         "auto_stop": 0,
-        "network": {"outbound": {"mode": "enabled", "allow_net": []}},
+        "network": {
+            "outbound": {"mode": "enabled", "allow_net": []},
+            **({"inbound": {"mode": "enabled"}} if inbound else {}),
+        },
     }
 
 
-def create_cloud_box(name, resources=None):
+def create_cloud_box(name, resources=None, *, inbound=True):
     data = cloud_api(
-        "POST", "/api/v1/boxes", cloud_create_payload(name, resources), timeout=90
+        "POST", "/api/v1/boxes", cloud_create_payload(name, resources, inbound=inbound), timeout=90
     )
     box_id = data.get("box_id") or data.get("id")
     if not box_id:
         raise RuntimeError("Cloud create returned no box id")
     return box_id, data.get("name") or name
+
+
+class CloudAPIError(RuntimeError):
+    def __init__(self, status):
+        self.status = status
+        super().__init__(f"BoxLite API request failed with HTTP {status}")
 
 
 def cloud_api(method, path, payload=None, timeout=30):
@@ -254,7 +263,7 @@ def cloud_api(method, path, payload=None, timeout=30):
             raise RuntimeError(
                 "BoxLite API rejected BOXLITE_API_KEY (HTTP 401); configure a valid key and restart the control platform"
             ) from exc
-        raise RuntimeError(f"BoxLite API {method} {path} failed with HTTP {exc.code}") from exc
+        raise CloudAPIError(exc.code) from None
 
 
 def authenticated_preview_url(preview):
@@ -264,6 +273,17 @@ def authenticated_preview_url(preview):
     return urllib.parse.urlunsplit(
         parts._replace(path=parts.path or "/", query=urllib.parse.urlencode(query))
     )
+
+
+def cloud_tunnel_url(box_id, port=PORT):
+    """Get the public URI from the tunnel API without opening its TCP stream."""
+    if not 1 <= int(port) <= 65535:
+        raise ValueError("Invalid tunnel port")
+    result = cloud_api("POST", f"/api/v1/boxes/{box_id}/network/tunnel?port={int(port)}", {})
+    uri = result.get("uri")
+    if not isinstance(uri, str) or not uri:
+        raise RuntimeError("Tunnel API returned no URI")
+    return uri
 
 
 def published_host_port(info, guest_port=PORT):
@@ -291,6 +311,12 @@ def service_url(mode, box, *, authenticated=True, host_port=None):
     if mode != "cloud":
         port = host_bind_port() if host_port is None else int(host_port)
         return f"http://127.0.0.1:{port}"
+    try:
+        return cloud_tunnel_url(box.id)
+    except CloudAPIError as error:
+        if error.status != 409:
+            raise
+    # Existing private Boxes retain their legacy authenticated preview links.
     preview = cloud_api("GET", f"/api/box/{box.id}/ports/{PORT}/preview-url")
     if authenticated:
         return authenticated_preview_url(preview)
@@ -363,7 +389,7 @@ class _LogWriter:
 
 async def drain(stream, destination, captured):
     async for chunk in stream:
-        text = str(chunk)
+        text = chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else str(chunk)
         captured.append(text)
         if destination is not None:
             destination.write(text)
@@ -381,15 +407,25 @@ async def run_checked(box, command, *, args=None, user=None, timeout_secs=None, 
     stderr = []
     destination_out = _LogWriter(log) if log is not None else sys.stdout
     destination_err = _LogWriter(log) if log is not None else sys.stderr
-    result, _, _ = await asyncio.gather(
-        execution.wait(),
+    # Consume both streams before wait(), matching the SDK's SimpleBox contract.
+    # Waiting concurrently can close REST streams before their output is read.
+    await asyncio.gather(
         drain(execution.stdout(), destination_out, stdout),
         drain(execution.stderr(), destination_err, stderr),
     )
-    if result.exit_code != 0:
+    result = await execution.wait()
+    exit_code = result.exit_code
+    if getattr(result, "error_message", None):
+        if runtime_mode() != "cloud":
+            raise RuntimeError("Execution transport failed")
+        from hangar.cloud_exec import recover_execution
+
+        identifier = execution.id() if callable(execution.id) else execution.id
+        exit_code = await recover_execution(box.id, identifier, destination_out, destination_err, (timeout_secs or 90)+30)
+    if exit_code != 0:
         detail = "".join(stderr)[-4000:].strip()
         raise RuntimeError(
-            f"Command failed with exit code {result.exit_code}: {command}\n{detail}"
+            f"Command failed with exit code {exit_code}: {command}\n{detail}"
         )
 
 
@@ -398,7 +434,7 @@ async def ensure_started(runtime, box, mode):
     if info is not None and info.state.running:
         return
     if mode == "cloud":
-        cloud_api("POST", f"/api/v1/boxes/{box.id}/start", {})
+        await asyncio.to_thread(cloud_api, "POST", f"/api/v1/boxes/{box.id}/start", {})
     else:
         await box.start()
     for _ in range(60):
@@ -414,7 +450,7 @@ async def ensure_stopped(runtime, box, mode):
     if info is None or not info.state.running:
         return
     if mode == "cloud":
-        cloud_api("POST", f"/api/v1/boxes/{box.id}/stop", {})
+        await asyncio.to_thread(cloud_api, "POST", f"/api/v1/boxes/{box.id}/stop", {})
     else:
         await box.stop()
     for _ in range(60):
@@ -427,7 +463,7 @@ async def ensure_stopped(runtime, box, mode):
 
 async def delete_box(runtime, box_id, mode):
     if mode == "cloud":
-        cloud_api("DELETE", f"/api/v1/boxes/{box_id}")
+        await asyncio.to_thread(cloud_api, "DELETE", f"/api/v1/boxes/{box_id}")
         return
     await runtime.remove(box_id, force=True)
 

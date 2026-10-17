@@ -60,9 +60,14 @@ if ! need_cmd go; then
   exit 1
 fi
 
-echo "Installing Python packages with ${python_bin} (BoxLite SDK, e2e client)."
-"$python_bin" -m pip install --upgrade pip
-"$python_bin" -m pip install 'boxlite>=0.9' 'websockets>=12'
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+venv_dir="${WEB_TERMINAL_VENV:-${repo_root}/.venv}"
+if [[ ! -x "${venv_dir}/bin/python" ]]; then
+  "$python_bin" -m venv "$venv_dir"
+fi
+python_bin="${venv_dir}/bin/python"
+echo "Installing isolated host dependencies."
+"$python_bin" -m pip install --disable-pip-version-check -r "${repo_root}/requirements.txt"
 
 "$python_bin" -c 'import boxlite; print("boxlite", boxlite.__version__)'
 go version

@@ -1,0 +1,3 @@
+boxlite==0.10.6; sys_platform == "darwin"
+boxlite==0.10.5; sys_platform != "darwin"
+websockets==17.2
