@@ -1,14 +1,20 @@
 PYTHON ?= .venv/bin/python
 GO ?= go
+TEST_TARGETS ?= test-python test-go test-supabase
 
-.PHONY: test test-python test-go test-supabase test-supabase-db test-supabase-live test-supabase-recovery test-supabase-admin-live test-supabase-ui build bootstrap
-test: test-python test-go test-supabase
+.PHONY: test test-python test-go test-terminal-ui test-supabase test-supabase-db test-supabase-live test-supabase-recovery test-supabase-admin-live test-supabase-ui build bootstrap
+test: $(TEST_TARGETS)
 
 test-python:
 	$(PYTHON) -m unittest discover -s hangar/test -v
 
 test-go:
 	$(GO) -C go test -race ./...
+
+test-terminal-ui:
+	mkdir -p build/terminal-ui
+	$(GO) -C go run . --print-page > build/terminal-ui/terminal.html
+	$(PYTHON) scripts/test_terminal_ui.py
 
 test-supabase:
 	$(PYTHON) -m unittest discover -s supabase/tests -v
