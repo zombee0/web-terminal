@@ -66,6 +66,15 @@ able to reach that CDN.
 
 ### Phone interaction
 
+- Tap **Browse output** to read retained output in a separate, natively
+  scrolling page. It opens at the latest text; swipe either way or long press
+  to select text without sending navigation keys to the terminal. **Refresh**
+  loads new output without moving an earlier reading position; **Latest**
+  jumps to the end. **Back to terminal** closes and clears the snapshot.
+  Incoming output continues in the terminal while the reading snapshot stays
+  fixed. The view includes normal-buffer history and the current screen of a
+  fullscreen application. Earlier fullscreen output overwritten by that
+  application is unavailable; this is explained in the reading view.
 - Tap the terminal to focus the software keyboard. Mobile pages do not focus
   the terminal automatically when the WebSocket connects.
 - Hold for 450 ms to select a word and open Copy / Paste / Select all / Done.
@@ -95,6 +104,10 @@ pinned CDN assets into `build/terminal-ui/`; screenshots are written there too.
 WebSocket and clipboard fixtures are isolated from real Boxes and clipboards.
 Real iPhone/Android checks are still needed for system clipboard permissions,
 native selection callouts and the software keyboard itself.
+The output reader is checked with actual Chromium touch and desktop wheel
+scrolling. Mobile WebKit cannot synthesize either native touch scrolling or
+wheel input in Playwright; its tests verify uncancelled touch events and DOM
+scrollability. Native iOS inertia and selection callouts remain device checks.
 
 For a host-recorded test run, use
 `make test TEST_TARGETS="test-go test-terminal-ui"`. The default `make test`

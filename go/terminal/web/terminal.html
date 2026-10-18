@@ -10,6 +10,9 @@
 </head>
 <body>
   <main id="app">
+    <div id="terminal-actions">
+      <button type="button" id="browse-output">Browse output</button>
+    </div>
     <div id="term" aria-label="Terminal"></div>
     <div id="selection-menu" role="toolbar" aria-label="Text selection" hidden>
       <button type="button" data-action="copy">Copy</button>
@@ -21,6 +24,24 @@
     <div id="selection-end" class="selection-handle end" aria-hidden="true" hidden></div>
     <div id="notice" role="status" aria-live="polite" hidden></div>
   </main>
+  <dialog id="output-dialog" aria-labelledby="output-title" aria-describedby="output-help">
+    <div class="output-heading">
+      <h2 id="output-title">Terminal output</h2>
+      <button type="button" id="output-close" autofocus>Back to terminal</button>
+    </div>
+    <p id="output-help"></p>
+    <div class="output-actions">
+      <button type="button" id="output-refresh">Refresh</button>
+      <button type="button" id="output-latest">Latest</button>
+    </div>
+    <div id="output-scroll" tabindex="0" aria-label="Scrollable terminal output">
+      <pre id="output-history"></pre>
+      <section id="output-current" hidden>
+        <h3>Current screen</h3>
+        <pre id="output-screen"></pre>
+      </section>
+    </div>
+  </dialog>
   <dialog id="clipboard-dialog" aria-labelledby="clipboard-title" aria-describedby="clipboard-help">
     <form id="clipboard-form">
       <h2 id="clipboard-title">Paste into terminal</h2>

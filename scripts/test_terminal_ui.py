@@ -108,6 +108,91 @@ async def point(page, col, row):
     }""", {"col": col, "row": row})
 
 
+async def browse_output(page, touch=None):
+    cols = await page.evaluate("testTerm.cols")
+    wrapped = "x" * (cols - 1) + " 中文🙂 end"
+    wide_wrap = "w" * (cols - 1) + "中"
+    history = "\r\n".join([wrapped, wide_wrap, "<img src=x onerror=alert(1)>"] +
+                           [f"saved output {i}" for i in range(200)] + ["pending input"])
+    await write(page, history)
+    await page.evaluate("testTerm.blur(); window.sent = []")
+    cursor = await page.evaluate("[testTerm.buffer.active.cursorX, testTerm.buffer.active.cursorY]")
+    await page.get_by_role("button", name="Browse output", exact=True).click()
+    reader = page.locator("#output-dialog")
+    scroll = page.locator("#output-scroll")
+    text = await page.locator("#output-history").text_content()
+    assert wrapped in text and wide_wrap in text, repr(text[:cols * 3])
+    assert "saved output 0" in text and "pending input" in text
+    assert "<img src=x onerror=alert(1)>" in text
+    assert await scroll.locator("img").count() == 0
+    await page.wait_for_function("document.querySelector('#output-scroll').scrollTop > 0")
+    bottom = await scroll.evaluate("e => e.scrollTop")
+    box = await scroll.bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+    async def scroll_by(delta):
+        if touch:
+            await page.evaluate("""() => {
+              window.readerTouchPrevented = false;
+              document.addEventListener('touchmove', e => {
+                window.readerTouchPrevented = e.defaultPrevented;
+              }, {once: true});
+            }""")
+            direction = 1 if delta > 0 else -1
+            await touch.swipe(x, y + direction * 70, y - direction * 70)
+            assert not await page.evaluate("readerTouchPrevented")
+            if not touch.cdp:
+                # Mobile WebKit cannot synthesize native touch scrolling or
+                # wheel input. Check uncancelled events and DOM scrollability;
+                # native iOS scrolling still requires device acceptance.
+                await scroll.evaluate("(e, delta) => { e.scrollTop += delta; }", delta)
+        else:
+            await page.mouse.move(x, y)
+            await page.mouse.wheel(0, delta)
+
+    await scroll_by(-300)
+    await page.wait_for_function("bottom => document.querySelector('#output-scroll').scrollTop < bottom", arg=bottom)
+    await page.wait_for_timeout(200)
+    earlier = await scroll.evaluate("e => e.scrollTop")
+    await scroll_by(100)
+    await page.wait_for_function("earlier => document.querySelector('#output-scroll').scrollTop > earlier", arg=earlier)
+    assert await page.evaluate("[testTerm.buffer.active.cursorX, testTerm.buffer.active.cursorY]") == cursor
+    assert await page.evaluate("sent.filter(x => typeof x !== 'string' || !x.startsWith('{')).length") == 0
+    # Incoming output cannot replace a snapshot or move the reading position.
+    await scroll.evaluate("e => { e.scrollTop = 120; }")
+    await write(page, "\r\nnew background output", reset=False)
+    assert await page.locator("#output-history").text_content() == text
+    assert await scroll.evaluate("e => e.scrollTop") == 120
+    await reader.get_by_role("button", name="Refresh", exact=True).click()
+    assert "new background output" in await page.locator("#output-history").text_content()
+    assert await scroll.evaluate("e => e.scrollTop") == 120
+    await reader.get_by_role("button", name="Latest", exact=True).click()
+    assert await scroll.evaluate("e => e.scrollHeight - e.scrollTop - e.clientHeight") < 2
+    await reader.get_by_role("button", name="Back to terminal", exact=True).click()
+    assert await reader.is_hidden()
+    await page.wait_for_function("document.querySelector('#output-history').textContent === ''")
+    assert await page.locator("#output-history").text_content() == ""
+    assert not await page.evaluate("document.activeElement === testTerm.textarea")
+    # Fullscreen applications retain only their current screen, not scrollback.
+    await write(page, "\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[Hfullscreen current", reset=False)
+    await page.evaluate("window.sent = []")
+    cursor = await page.evaluate("[testTerm.buffer.active.cursorX, testTerm.buffer.active.cursorY]")
+    await page.get_by_role("button", name="Browse output", exact=True).click()
+    assert "saved output 0" in await page.locator("#output-history").text_content()
+    assert "fullscreen current" in await page.locator("#output-screen").text_content()
+    assert "overwritten" in await page.locator("#output-help").text_content()
+    browser_name = page.context.browser.browser_type.name
+    await page.screenshot(path=str(OUT / f"{browser_name}-output-{page.viewport_size['width']}.png"))
+    await scroll.evaluate("e => { e.scrollTop = 0; }")
+    await scroll_by(150)
+    await page.wait_for_function("document.querySelector('#output-scroll').scrollTop > 0")
+    await reader.get_by_role("button", name="Back to terminal", exact=True).click()
+    assert await page.evaluate("[testTerm.buffer.active.cursorX, testTerm.buffer.active.cursorY]") == cursor
+    assert await page.evaluate("sent.filter(x => typeof x !== 'string' || !x.startsWith('{')).length") == 0
+    await page.wait_for_function("document.querySelector('#output-screen').textContent === ''")
+    assert await page.locator("#output-screen").text_content() == ""
+
+
 async def mobile(browser, name, sources, chromium=False):
     context = await browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, device_scale_factor=2)
     await context.add_init_script(f"({FIXTURE})()")
@@ -131,6 +216,7 @@ async def mobile(browser, name, sources, chromium=False):
     assert await page.evaluate("socket.binaryType") == "arraybuffer"
     assert not await page.evaluate("document.activeElement === testTerm.textarea"), "Mobile must not autofocus"
     touch = Touch(page, await context.new_cdp_session(page) if chromium else None)
+    await browse_output(page, touch)
     menu = page.locator("#selection-menu")
 
     # Select a word, then extend the end handle across a CJK/emoji line.
@@ -302,6 +388,14 @@ async def mobile(browser, name, sources, chromium=False):
         await page.set_viewport_size({"width": width, "height": height})
         await page.wait_for_function("Math.abs(document.querySelector('#app').getBoundingClientRect().height - visualViewport.height) < 2")
         await write(page, "alpha beta gamma")
+        await page.get_by_role("button", name="Browse output", exact=True).click()
+        reader = page.locator("#output-dialog")
+        reader_box = await reader.bounding_box()
+        assert reader_box["x"] >= 0 and reader_box["x"] + reader_box["width"] <= width + 1
+        assert reader_box["y"] >= 0 and reader_box["y"] + reader_box["height"] <= height + 1
+        assert await page.locator("#output-scroll").evaluate("e => e.clientHeight") > 40
+        await page.screenshot(path=str(OUT / f"{name}-reader-{width}x{height}.png"))
+        await reader.get_by_role("button", name="Back to terminal", exact=True).click()
         await touch.hold(*await point(page, 8, 0))
         box = await menu.bounding_box()
         assert box["x"] >= 0 and box["x"] + box["width"] <= width + 1, (width, box)
@@ -310,7 +404,7 @@ async def mobile(browser, name, sources, chromium=False):
         await menu.get_by_role("button", name="Dismiss selection", exact=True).click()
     assert not errors, errors
     await context.close()
-    print(f"PASS {name}: selection/CJK/wrap, copy/paste/fallback, cancel/disconnect, scroll/mouse/alt, binary/proxy, viewport", flush=True)
+    print(f"PASS {name}: output reader, selection/CJK/wrap, copy/paste/fallback, cancel/disconnect, scroll/mouse/alt, binary/proxy, viewport", flush=True)
 
 
 async def desktop(browser, sources):
@@ -348,8 +442,20 @@ async def desktop(browser, sources):
     await page.keyboard.type("pwd")
     await page.keyboard.press("Enter")
     assert await page.evaluate("sent.filter(x => !x.startsWith('{')).join('')") == "pwd\r"
+    await browse_output(page)
+    await write(page, "selectable output line")
+    await page.get_by_role("button", name="Browse output", exact=True).click()
+    text_box = await page.locator("#output-history").bounding_box()
+    await page.mouse.move(text_box["x"], text_box["y"] + 10)
+    await page.mouse.down()
+    await page.mouse.move(text_box["x"] + 200, text_box["y"] + 10, steps=5)
+    await page.mouse.up()
+    assert await page.evaluate("getSelection().toString()") == "selectable output line"
+    await page.keyboard.press("Escape")
+    assert await page.locator("#output-dialog").is_hidden()
+    await page.wait_for_function("document.querySelector('#output-history').textContent === ''")
     await context.close()
-    print("PASS desktop: mouse selection, typing/Enter, root websocket, optional addon failure", flush=True)
+    print("PASS desktop: native output scrolling/selection, mouse selection, typing/Enter, root websocket, optional addon failure", flush=True)
 
 
 async def main():

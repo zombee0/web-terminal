@@ -350,6 +350,62 @@
     }
   }, { capture: true });
 
+  const outputDialog = document.querySelector('#output-dialog');
+  const outputScroll = document.querySelector('#output-scroll');
+  const outputHistory = document.querySelector('#output-history');
+  const outputScreen = document.querySelector('#output-screen');
+
+  function bufferText(buffer) {
+    const parts = [];
+    for (let row = 0; row < buffer.length; row++) {
+      const line = buffer.getLine(row);
+      const wrapped = buffer.getLine(row + 1)?.isWrapped;
+      let end = line.length;
+      if (wrapped) {
+        // A wide character can leave an unused cell before wrapping. Remove
+        // that padding, but retain actual spaces at a logical line boundary.
+        while (end > 0) {
+          const cell = line.getCell(end - 1);
+          if (cell.getWidth() !== 1 || cell.getChars()) break;
+          end--;
+        }
+      }
+      parts.push(line.translateToString(!wrapped, 0, end));
+      if (!wrapped) parts.push('\n');
+    }
+    return parts.join('').replace(/\n+$/, '');
+  }
+
+  function refreshOutput() {
+    const position = outputScroll.scrollTop;
+    const atLatest = outputScroll.scrollHeight - position - outputScroll.clientHeight < 2;
+    const fullscreen = term.buffer.active.type === 'alternate';
+    outputHistory.textContent = bufferText(term.buffer.normal);
+    outputScreen.textContent = fullscreen ? bufferText(term.buffer.alternate) : '';
+    document.querySelector('#output-current').hidden = !fullscreen;
+    document.querySelector('#output-help').textContent = fullscreen
+      ? 'Retained history and current screen. Earlier fullscreen output that was overwritten is unavailable. Refresh to update.'
+      : 'Retained output from this tab. Scroll to read; Refresh to include new output.';
+    outputScroll.scrollTop = atLatest ? outputScroll.scrollHeight : position;
+  }
+
+  document.querySelector('#browse-output').addEventListener('click', () => {
+    cancelGesture();
+    dismiss();
+    term.blur();
+    outputDialog.showModal();
+    refreshOutput();
+    outputScroll.scrollTop = outputScroll.scrollHeight;
+  });
+  document.querySelector('#output-refresh').addEventListener('click', refreshOutput);
+  document.querySelector('#output-latest').addEventListener('click', () => {
+    outputScroll.scrollTop = outputScroll.scrollHeight;
+  });
+  document.querySelector('#output-close').addEventListener('click', () => outputDialog.close());
+  outputDialog.addEventListener('close', () => {
+    outputHistory.textContent = outputScreen.textContent = '';
+  });
+
   function openClipboard(mode, text = '') {
     dismiss();
     const copying = mode === 'copy';
