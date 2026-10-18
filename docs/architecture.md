@@ -64,6 +64,43 @@ terminals that display East Asian text.
 The current browser assets are loaded from jsDelivr, so the browser must be
 able to reach that CDN.
 
+### Phone interaction
+
+- Tap the terminal to focus the software keyboard. Mobile pages do not focus
+  the terminal automatically when the WebSocket connects.
+- Hold for 450 ms to select a word and open Copy / Paste / Select all / Done.
+  Drag either handle to change the selection, including across wrapped lines
+  and CJK text. Drag near a viewport edge to extend into scrollback.
+- Swipe vertically to scroll. Movement cancels the long press. In mouse mode
+  or the alternate screen, swipes use xterm's wheel handling so applications
+  can receive their expected mouse reports or cursor keys.
+- Copy and Paste first use the browser clipboard API on the button press.
+  When unavailable or denied, a native textarea allows the phone's own
+  long-press Copy/Paste menu. Fallback paste sends only after confirmation;
+  cancel sends nothing. Clipboard text is cleared from the field on close.
+- Pasting uses xterm's bracketed-paste support and does not append Enter.
+  Newlines already present in the clipboard retain normal terminal behavior.
+- The terminal follows the visual viewport when the keyboard or orientation
+  changes. Resizing clears a touch selection because reflow changes its cells.
+
+The HTML, CSS and JavaScript live in `go/terminal/web/` and are embedded into
+the binary as a single page, including for `--print-page`. No additional
+asset routes are needed through the authenticated proxy.
+
+Run `make test-terminal-ui` for Chromium touch input, WebKit DOM touch events,
+and desktop regression checks. This uses the existing Python Playwright
+environment, installed Chrome and a Playwright WebKit installation
+(`.venv/bin/python -m playwright install webkit`). The first run downloads the
+pinned CDN assets into `build/terminal-ui/`; screenshots are written there too.
+WebSocket and clipboard fixtures are isolated from real Boxes and clipboards.
+Real iPhone/Android checks are still needed for system clipboard permissions,
+native selection callouts and the software keyboard itself.
+
+For a host-recorded test run, use
+`make test TEST_TARGETS="test-go test-terminal-ui"`. The default `make test`
+suite is unchanged. The [mobile design and acceptance issue](https://github.com/zombee0/web-terminal/issues/2)
+records the approach, alternatives and outstanding phone checks.
+
 ## Authentication and Preview Access
 
 The terminal process does not implement end-user authentication. A deployment

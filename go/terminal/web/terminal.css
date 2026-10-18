@@ -1,0 +1,35 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #090d12; color: #d5e1eb; font: 14px system-ui; }
+[hidden] { display: none !important; }
+button { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; touch-action: manipulation; }
+button:disabled { opacity: .4; cursor: default; }
+button:active { background: #344c65; }
+button:focus-visible { outline: 2px solid #78b7ff; outline-offset: -2px; }
+#app { position: absolute; top: 0; left: 0; width: 100%; max-width: 100%; height: 100%; height: 100dvh; overflow: hidden; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+#term { width: 100%; height: 100%; touch-action: pinch-zoom; }
+/* Keep native selection/callouts available in the clipboard fallback field. */
+#term, .selection-handle { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+#term .xterm-viewport { overscroll-behavior: contain; }
+/* xterm replaces text spans during selection. Keep touch events on the stable
+   screen element so repainting cannot swallow touchend and leave a drag stuck. */
+#term.touch-input .xterm-rows { pointer-events: none; }
+#term .xterm-helper-textarea { font-size: 16px; }
+#selection-menu { position: absolute; z-index: 4; display: flex; width: max-content; max-width: 100%; padding: 4px; border: 1px solid #41566d; border-radius: 12px; background: #202e3d; box-shadow: 0 6px 24px #0008; }
+#selection-menu button { padding: 0 10px; white-space: nowrap; }
+.selection-handle { position: absolute; z-index: 3; width: 44px; height: 44px; transform: translateX(-50%); touch-action: none; }
+.selection-handle::after { content: ''; position: absolute; left: 14px; width: 16px; height: 16px; border-radius: 50%; background: #78b7ff; box-shadow: 0 0 0 2px #090d12; }
+.selection-handle::before { content: ''; position: absolute; left: 21px; width: 2px; height: 12px; background: #78b7ff; }
+.selection-handle.start { transform: translate(-50%, -100%); }
+.selection-handle.start::after { bottom: 10px; }
+.selection-handle.start::before { bottom: 0; }
+.selection-handle.end::after { top: 10px; }
+.selection-handle.end::before { top: 0; }
+#notice { position: absolute; z-index: 5; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 10px 16px; border-radius: 8px; background: #263a4d; text-align: center; pointer-events: none; }
+dialog { position: absolute; top: var(--viewport-center, 50%); left: 50%; transform: translate(-50%, -50%); margin: 0; width: min(480px, calc(100% - 24px)); max-height: calc(var(--viewport-height, 100dvh) - 24px); overflow: auto; padding: 20px; border: 1px solid #41566d; border-radius: 16px; background: #131c26; color: #d5e1eb; }
+dialog::backdrop { background: #0009; }
+dialog h2 { margin: 0 0 8px; font-size: 18px; }
+dialog p { margin: 0 0 16px; color: #aebfd0; line-height: 1.5; }
+dialog textarea { display: block; width: 100%; height: 140px; max-height: calc(var(--viewport-height, 100dvh) * .3); padding: 12px; border: 1px solid #41566d; border-radius: 8px; background: #090d12; color: #d5e1eb; font: 16px ui-monospace, monospace; resize: vertical; -webkit-user-select: text; user-select: text; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+#clipboard-submit { background: #284b6d; }

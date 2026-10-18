@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"io"
@@ -16,10 +17,18 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const (
-	keepalivePeriod = 15 * time.Second
-	terminalPage    = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Box Terminal</title><link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22%2310151c%22%2F%3E%3Cpath%20d%3D%22m8%2010%206%206-6%206m10%200h6%22%20fill%3D%22none%22%20stroke%3D%22%234ade80%22%20stroke-width%3D%223%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"><style>html,body{margin:0;height:100%;background:#10151c;color:#d5e1eb;font:14px system-ui}#term{height:100%;width:100%}</style></head><body><div id="term"></div><script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script><script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script><script src="https://cdn.jsdelivr.net/npm/xterm-addon-unicode11@0.6.0/lib/xterm-addon-unicode11.js"></script><script>const term=new Terminal({cursorBlink:true,convertEol:true,scrollback:10000,scrollOnOutput:false,fontFamily:"ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Noto Sans Mono CJK SC','PingFang SC','Microsoft YaHei',monospace",theme:{background:'#090d12'}});const fitAddon=new FitAddon.FitAddon();const unicodeAddon=new Unicode11Addon.Unicode11Addon();term.loadAddon(fitAddon);term.loadAddon(unicodeAddon);term.unicode.activeVersion='11';term.open(document.querySelector('#term'));fitAddon.fit();const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws'+location.search);ws.onopen=()=>{fitAddon.fit();sendSize();term.focus()};ws.onmessage=e=>term.write(e.data);ws.onclose=()=>term.write('\r\n[Connection closed]\r\n');ws.onerror=()=>term.write('\r\n[Connection error]\r\n');term.onData(data=>{if(ws.readyState===WebSocket.OPEN)ws.send(data)});function sendSize(){if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'resize',cols:term.cols,rows:term.rows}))}window.addEventListener('resize',()=>{fitAddon.fit();sendSize()});</script></body></html>`
-)
+const keepalivePeriod = 15 * time.Second
+
+// Embed local assets into one page for authenticated proxies and --print-page.
+//
+//go:embed web/terminal.html
+var terminalPage string
+
+//go:embed web/terminal.css
+var terminalCSS string
+
+//go:embed web/terminal.js
+var terminalJS string
 
 // Upgrader uses the default Gorilla policy (Origin must match Host). The
 // platform proxy must preserve the public Host and authenticate BOTH / and
@@ -54,19 +63,7 @@ func Environment() []string {
 }
 
 func PageHTML() string {
-	source := strings.Replace(terminalPage, `+location.host+'/ws'+location.search`, `+location.host+location.pathname.replace(/\/?$/, '/')+'ws'+location.search`, 1)
-	page := strings.Replace(
-		source,
-		`const unicodeAddon=new Unicode11Addon.Unicode11Addon();term.loadAddon(fitAddon);term.loadAddon(unicodeAddon);term.unicode.activeVersion='11';`,
-		`term.loadAddon(fitAddon);if(window.Unicode11Addon){try{const unicodeAddon=new Unicode11Addon.Unicode11Addon();term.loadAddon(unicodeAddon);term.unicode.activeVersion='11'}catch(error){console.warn('Unicode addon disabled',error)}}`,
-		1,
-	)
-	return strings.Replace(
-		page,
-		`ws.onmessage=e=>term.write(e.data);`,
-		`ws.binaryType='arraybuffer';ws.onmessage=e=>term.write(typeof e.data==='string'?e.data:new Uint8Array(e.data));`,
-		1,
-	)
+	return strings.NewReplacer("/* TERMINAL_CSS */", terminalCSS, "/* TERMINAL_JS */", terminalJS).Replace(terminalPage)
 }
 
 func sendBinary(conn *websocket.Conn, mu *sync.Mutex, payload []byte) error {
