@@ -357,8 +357,11 @@
   const outputSource = document.querySelector('#output-source');
   const outputHelp = document.querySelector('#output-help');
   const historyKeys = {
-    codex: { toggle: '\x14', latest: '\x1b[F' },
-    claude: { toggle: '\x0f', latest: '\x1b[1;5F' }
+    codex: { enter: '\x14', leave: '\x14', latest: '\x1b[F' },
+    claude: { enter: '\x0f', leave: '\x0f', latest: '\x1b[1;5F' },
+    // Reopen copy mode at the bottom for Latest. These default keys work in
+    // both vi and emacs modes without typing a command or submitting Enter.
+    tmux: { enter: '\x02[', leave: 'q', latest: 'q\x02[' }
   };
   let outputApp = '';
   let outputLatestKey = '';
@@ -366,9 +369,9 @@
   let outputNeedsRefresh = false;
   let outputPageDirection = 0;
 
-  function bufferText(buffer) {
+  function bufferText(buffer, firstRow = 0) {
     const parts = [];
-    for (let row = 0; row < buffer.length; row++) {
+    for (let row = firstRow; row < buffer.length; row++) {
       const line = buffer.getLine(row);
       const wrapped = buffer.getLine(row + 1)?.isWrapped;
       let end = line.length;
@@ -391,14 +394,15 @@
     const position = outputScroll.scrollTop;
     const atLatest = outputScroll.scrollHeight - position - outputScroll.clientHeight < 2;
     const fullscreen = term.buffer.active.type === 'alternate';
-    const text = bufferText(outputApp ? term.buffer.active : term.buffer.normal);
+    const buffer = outputApp ? term.buffer.active : term.buffer.normal;
+    const text = bufferText(buffer, outputApp === 'tmux' ? buffer.baseY : 0);
     // Avoid replacing selected DOM text when an app repaints an unchanged page.
     if (outputHistory.textContent !== text) outputHistory.textContent = text;
     outputScreen.textContent = fullscreen && !outputApp ? bufferText(term.buffer.alternate) : '';
     document.querySelector('#output-current').hidden = !fullscreen || !!outputApp;
     outputHelp.textContent = outputApp
       ? (ws.readyState === WebSocket.OPEN ? 'Previous / Next to browse app history.' : 'Disconnected. Saved text is still readable.')
-      : (fullscreen ? 'More messages? Choose your app above.' : 'Previous / Next to read more output.');
+      : (fullscreen ? 'More output? Choose Tmux history or your app above.' : 'Previous / Next to read more output.');
     outputScroll.scrollTop = outputPageDirection
       ? (outputPageDirection < 0 ? outputScroll.scrollHeight : 0)
       : (atLatest ? outputScroll.scrollHeight : position);
@@ -417,7 +421,7 @@
   }
 
   function leaveAppHistory() {
-    if (outputApp && ws.readyState === WebSocket.OPEN) ws.send(historyKeys[outputApp].toggle);
+    if (outputApp && ws.readyState === WebSocket.OPEN) ws.send(historyKeys[outputApp].leave);
     outputApp = '';
     outputLatestKey = '';
     outputSource.value = 'terminal';
@@ -439,7 +443,7 @@
       // inline UI opens a separate pager whose bottom shortcut is End.
       outputLatestKey = outputApp === 'codex' && term.buffer.active.type === 'alternate'
         ? '\x1b[1;5F' : historyKeys[outputApp].latest;
-      sendHistoryKey(historyKeys[outputApp].toggle);
+      sendHistoryKey(historyKeys[outputApp].enter);
     }
     outputNeedsRefresh = true; // Capture the response to entering/leaving a transcript.
     refreshOutput();
@@ -458,6 +462,10 @@
     });
   });
 
+  function canPageApp() {
+    return outputApp && (outputApp === 'tmux' || term.buffer.active.type === 'alternate');
+  }
+
   function pageOutput(direction) {
     if (outputApp && ws.readyState !== WebSocket.OPEN) {
       outputHelp.textContent = 'Disconnected. Saved text is still readable.';
@@ -465,7 +473,7 @@
     const position = outputScroll.scrollTop;
     const next = clamp(position + direction * Math.max(1, outputScroll.clientHeight - 36),
       0, outputScroll.scrollHeight - outputScroll.clientHeight);
-    if (Math.abs(next - position) > 1 || !outputApp || term.buffer.active.type === 'normal') {
+    if (Math.abs(next - position) > 1 || !canPageApp()) {
       outputScroll.scrollTop = next;
       return;
     }
@@ -486,7 +494,7 @@
   document.querySelector('#output-previous').addEventListener('click', () => pageOutput(-1));
   document.querySelector('#output-next').addEventListener('click', () => pageOutput(1));
   document.querySelector('#output-latest').addEventListener('click', () => {
-    if (outputApp && term.buffer.active.type === 'alternate') sendHistoryKey(outputLatestKey);
+    if (canPageApp()) sendHistoryKey(outputLatestKey);
     outputScroll.scrollTop = outputScroll.scrollHeight;
   });
   document.querySelector('#output-close').addEventListener('click', () => outputDialog.close());

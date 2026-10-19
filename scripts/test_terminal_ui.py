@@ -214,10 +214,14 @@ async def history_paging(page):
     assert await page.evaluate("sent.filter(x => typeof x !== 'string' || !x.startsWith('{')).length") == 0
 
     source = reader.get_by_role("combobox", name="Output source")
-    for app, toggle, latest in (("codex", "\x14", "\x1b[F"), ("claude", "\x0f", "\x1b[1;5F")):
+    for app, enter, leave, latest in (
+        ("codex", "\x14", "\x14", "\x1b[F"),
+        ("claude", "\x0f", "\x0f", "\x1b[1;5F"),
+        ("tmux", "\x02[", "q", "q\x02["),
+    ):
         await page.evaluate("window.sent = []")
         await source.select_option(app)
-        assert await page.evaluate("sent.join('')") == toggle
+        assert await page.evaluate("sent.join('')") == enter
         # The application owns older messages. Deliver its redraw over the
         # real websocket input path; they never existed in normal scrollback.
         await page.evaluate("socket.onmessage({data: '\\x1b[?1049h\\x1b[2J\\x1b[Happ latest'})")
@@ -263,9 +267,23 @@ async def history_paging(page):
         await reader.get_by_role("button", name="Refresh", exact=True).click()
         assert "new app output" in await page.locator("#output-history").text_content()
         await source.select_option("terminal")
-        assert await page.evaluate("sent[sent.length - 1]") == toggle
+        assert await page.evaluate("sent[sent.length - 1]") == leave
         await page.evaluate("socket.onmessage({data: '\\x1b[?1049l'})")
+        await page.wait_for_function("testTerm.buffer.active.type === 'normal'")
         await page.wait_for_function("document.querySelector('#output-history').textContent.includes('older output 0')")
+
+    # A tmux client can use the normal buffer too. Its screen, not old local
+    # scrollback, is the page; reaching its top must still request tmux history.
+    await source.select_option("tmux")
+    assert "older output 0\n" not in await page.locator("#output-history").text_content()
+    await scroll.evaluate("e => { e.scrollTop = 0; }")
+    await page.evaluate("window.sent = []")
+    await previous.click()
+    assert await page.evaluate("sent.join('')") == "\x1b[5~"
+    await reader.get_by_role("button", name="Latest", exact=True).click()
+    assert await page.evaluate("sent[sent.length - 1]") == "q\x02["
+    await source.select_option("terminal")
+    assert await page.evaluate("sent[sent.length - 1]") == "q"
 
     # Closing exits only an explicitly selected app transcript, exactly once.
     await source.select_option("codex")
@@ -275,13 +293,13 @@ async def history_paging(page):
     assert await page.evaluate("sent.join('')") == "\x14"
     assert await page.locator("#output-source").input_value() == "terminal"
     await page.get_by_role("button", name="Browse output", exact=True).click()
-    await source.select_option("claude")
+    await source.select_option("tmux")
     await page.evaluate("window.sent = []")
     await page.keyboard.press("Escape")
     await page.wait_for_function("sent.length === 1")
-    assert await page.evaluate("sent.join('')") == "\x0f"
+    assert await page.evaluate("sent.join('')") == "q"
     await page.get_by_role("button", name="Browse output", exact=True).click()
-    await source.select_option("claude")
+    await source.select_option("tmux")
     await page.evaluate("window.sent = []; socket.readyState = 3")
     await previous.click()
     assert "Disconnected" in await page.locator("#output-help").text_content()

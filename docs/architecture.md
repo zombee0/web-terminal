@@ -73,6 +73,14 @@ able to reach that CDN.
   **Latest** jumps to the end. Terminal output stays fixed while reading.
   xterm retains 10,000 normal-buffer lines, but only a fullscreen program's
   current screen. It cannot reconstruct overwritten application text.
+- While attached to tmux, choose **Tmux history (Ctrl+B)**. This enters tmux's
+  copy mode and reads the pane's retained history. **Previous** / **Next** scroll
+  the displayed page, then send PageUp / PageDown to tmux. **Latest** exits and
+  reopens copy mode at the bottom. **Back to terminal**, Escape or changing the
+  source exits copy mode with `q`, preserving the pane's input draft.
+  This supports default Ctrl+B / `[` / `q` bindings with vi or emacs mode keys.
+  Custom bindings and nested tmux require manual navigation. History capacity
+  belongs to tmux; the reader does not change it or recover discarded lines.
 - While Codex or Claude Code is running, choose **Codex history** or **Claude
   history** in the reader. This opens the tool's own transcript using its
   default Ctrl+T or Ctrl+O binding. Earlier messages come from the application.
@@ -85,7 +93,7 @@ able to reach that CDN.
   sent by these controls.
 - App pages follow returned output, pausing replacement during native text
   selection. **Back to terminal**, Escape, or switching back to **Terminal
-  output** sends the selected app's transcript toggle once to leave it.
+  output** sends the selected app's exit binding once to leave it.
   Closing the reader clears copied text. Disconnected controls send nothing.
   These shortcuts require the matching running tool and its default bindings.
 - Tap the terminal to focus the software keyboard. Mobile pages do not focus
@@ -132,7 +140,14 @@ No model calls or user conversations are used. Codex 0.163.0 and Claude Code
 2.1.303 pass in fullscreen and inline modes: all 120 history markers are visible
 while paging, Latest returns to the last marker, and closing preserves the draft
 and insertion point. These checks do not establish compatibility with the user's
-guest versions, remapped shortcuts or terminal multiplexers.
+guest versions or remapped shortcuts.
+
+Run `make test TEST_TARGETS=test-terminal-tmux` for tmux acceptance. It uses an
+isolated real tmux server with synthetic output, vi and emacs mode keys, and a
+mobile browser connected through a PTY. It checks all 120 numbered lines become
+visible, Next retrieves a newer page, Latest returns to the end, and closing
+preserves an unsubmitted shell draft and its insertion point. No existing tmux
+sessions or user conversation contents are read or changed.
 
 For a host-recorded test run, use
 `make test TEST_TARGETS="test-go test-terminal-ui"`. The default `make test`
