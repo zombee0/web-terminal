@@ -354,6 +354,17 @@
   const outputScroll = document.querySelector('#output-scroll');
   const outputHistory = document.querySelector('#output-history');
   const outputScreen = document.querySelector('#output-screen');
+  const outputSource = document.querySelector('#output-source');
+  const outputHelp = document.querySelector('#output-help');
+  const historyKeys = {
+    codex: { toggle: '\x14', latest: '\x1b[F' },
+    claude: { toggle: '\x0f', latest: '\x1b[1;5F' }
+  };
+  let outputApp = '';
+  let outputLatestKey = '';
+  let outputFrame = 0;
+  let outputNeedsRefresh = false;
+  let outputPageDirection = 0;
 
   function bufferText(buffer) {
     const parts = [];
@@ -380,13 +391,87 @@
     const position = outputScroll.scrollTop;
     const atLatest = outputScroll.scrollHeight - position - outputScroll.clientHeight < 2;
     const fullscreen = term.buffer.active.type === 'alternate';
-    outputHistory.textContent = bufferText(term.buffer.normal);
-    outputScreen.textContent = fullscreen ? bufferText(term.buffer.alternate) : '';
-    document.querySelector('#output-current').hidden = !fullscreen;
-    document.querySelector('#output-help').textContent = fullscreen
-      ? 'Retained history and current screen. Earlier fullscreen output that was overwritten is unavailable. Refresh to update.'
-      : 'Retained output from this tab. Scroll to read; Refresh to include new output.';
-    outputScroll.scrollTop = atLatest ? outputScroll.scrollHeight : position;
+    const text = bufferText(outputApp ? term.buffer.active : term.buffer.normal);
+    // Avoid replacing selected DOM text when an app repaints an unchanged page.
+    if (outputHistory.textContent !== text) outputHistory.textContent = text;
+    outputScreen.textContent = fullscreen && !outputApp ? bufferText(term.buffer.alternate) : '';
+    document.querySelector('#output-current').hidden = !fullscreen || !!outputApp;
+    outputHelp.textContent = outputApp
+      ? (ws.readyState === WebSocket.OPEN ? 'Previous / Next to browse app history.' : 'Disconnected. Saved text is still readable.')
+      : (fullscreen ? 'More messages? Choose your app above.' : 'Previous / Next to read more output.');
+    outputScroll.scrollTop = outputPageDirection
+      ? (outputPageDirection < 0 ? outputScroll.scrollHeight : 0)
+      : (atLatest ? outputScroll.scrollHeight : position);
+    outputPageDirection = 0;
+  }
+
+  function sendHistoryKey(key) {
+    if (ws.readyState !== WebSocket.OPEN) {
+      outputHelp.textContent = 'Disconnected. Saved text is still readable.';
+      return false;
+    }
+    const selection = getSelection();
+    if (outputScroll.contains(selection?.anchorNode)) selection.removeAllRanges();
+    ws.send(key);
+    return true;
+  }
+
+  function leaveAppHistory() {
+    if (outputApp && ws.readyState === WebSocket.OPEN) ws.send(historyKeys[outputApp].toggle);
+    outputApp = '';
+    outputLatestKey = '';
+    outputSource.value = 'terminal';
+  }
+
+  outputSource.addEventListener('change', () => {
+    const next = outputSource.value;
+    if (next === (outputApp || 'terminal')) return;
+    if (next !== 'terminal' && ws.readyState !== WebSocket.OPEN) {
+      outputSource.value = outputApp || 'terminal';
+      outputHelp.textContent = 'Disconnected. Saved text is still readable.';
+      return;
+    }
+    leaveAppHistory();
+    outputSource.value = next;
+    outputApp = next === 'terminal' ? '' : next;
+    if (outputApp) {
+      // Codex's owned fullscreen transcript uses Ctrl+End; its classic
+      // inline UI opens a separate pager whose bottom shortcut is End.
+      outputLatestKey = outputApp === 'codex' && term.buffer.active.type === 'alternate'
+        ? '\x1b[1;5F' : historyKeys[outputApp].latest;
+      sendHistoryKey(historyKeys[outputApp].toggle);
+    }
+    outputNeedsRefresh = true; // Capture the response to entering/leaving a transcript.
+    refreshOutput();
+    outputScroll.scrollTop = outputScroll.scrollHeight;
+  });
+
+  term.onWriteParsed(() => {
+    if (!outputDialog.open || (!outputApp && !outputNeedsRefresh)) return;
+    cancelAnimationFrame(outputFrame);
+    outputFrame = requestAnimationFrame(() => {
+      if (!outputDialog.open) return;
+      const selection = getSelection();
+      if (selection?.toString() && outputScroll.contains(selection.anchorNode)) return;
+      outputNeedsRefresh = false;
+      refreshOutput();
+    });
+  });
+
+  function pageOutput(direction) {
+    if (outputApp && ws.readyState !== WebSocket.OPEN) {
+      outputHelp.textContent = 'Disconnected. Saved text is still readable.';
+    }
+    const position = outputScroll.scrollTop;
+    const next = clamp(position + direction * Math.max(1, outputScroll.clientHeight - 36),
+      0, outputScroll.scrollHeight - outputScroll.clientHeight);
+    if (Math.abs(next - position) > 1 || !outputApp || term.buffer.active.type === 'normal') {
+      outputScroll.scrollTop = next;
+      return;
+    }
+    // Page within the running tool only after the current text page is read.
+    // Arrow keys would navigate prompt history instead.
+    if (sendHistoryKey(direction < 0 ? '\x1b[5~' : '\x1b[6~')) outputPageDirection = direction;
   }
 
   document.querySelector('#browse-output').addEventListener('click', () => {
@@ -398,11 +483,18 @@
     outputScroll.scrollTop = outputScroll.scrollHeight;
   });
   document.querySelector('#output-refresh').addEventListener('click', refreshOutput);
+  document.querySelector('#output-previous').addEventListener('click', () => pageOutput(-1));
+  document.querySelector('#output-next').addEventListener('click', () => pageOutput(1));
   document.querySelector('#output-latest').addEventListener('click', () => {
+    if (outputApp && term.buffer.active.type === 'alternate') sendHistoryKey(outputLatestKey);
     outputScroll.scrollTop = outputScroll.scrollHeight;
   });
   document.querySelector('#output-close').addEventListener('click', () => outputDialog.close());
   outputDialog.addEventListener('close', () => {
+    leaveAppHistory();
+    cancelAnimationFrame(outputFrame);
+    outputNeedsRefresh = false;
+    outputPageDirection = 0;
     outputHistory.textContent = outputScreen.textContent = '';
   });
 

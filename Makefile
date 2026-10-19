@@ -2,7 +2,7 @@ PYTHON ?= .venv/bin/python
 GO ?= go
 TEST_TARGETS ?= test-python test-go test-supabase
 
-.PHONY: test test-python test-go test-terminal-ui test-supabase test-supabase-db test-supabase-live test-supabase-recovery test-supabase-admin-live test-supabase-ui build bootstrap
+.PHONY: test test-python test-go test-terminal-ui test-terminal-apps test-supabase test-supabase-db test-supabase-live test-supabase-recovery test-supabase-admin-live test-supabase-ui build bootstrap
 test: $(TEST_TARGETS)
 
 test-python:
@@ -15,6 +15,11 @@ test-terminal-ui:
 	mkdir -p build/terminal-ui
 	$(GO) -C go run . --print-page > build/terminal-ui/terminal.html
 	$(PYTHON) scripts/test_terminal_ui.py
+
+test-terminal-apps:
+	mkdir -p build/terminal-ui
+	$(GO) -C go run . --print-page > build/terminal-ui/terminal.html
+	$(PYTHON) scripts/test_terminal_apps.py
 
 test-supabase:
 	$(PYTHON) -m unittest discover -s supabase/tests -v

@@ -66,15 +66,28 @@ able to reach that CDN.
 
 ### Phone interaction
 
-- Tap **Browse output** to read retained output in a separate, natively
-  scrolling page. It opens at the latest text; swipe either way or long press
-  to select text without sending navigation keys to the terminal. **Refresh**
-  loads new output without moving an earlier reading position; **Latest**
-  jumps to the end. **Back to terminal** closes and clears the snapshot.
-  Incoming output continues in the terminal while the reading snapshot stays
-  fixed. The view includes normal-buffer history and the current screen of a
-  fullscreen application. Earlier fullscreen output overwritten by that
-  application is unavailable; this is explained in the reading view.
+- Tap **Browse output** for a full-height mobile reading view. **Terminal
+  output** shows retained history; swipe or use **Previous** / **Next** to
+  page through it. Native selection and paging in this source send no input.
+- **Refresh** loads new output while preserving an earlier reading position;
+  **Latest** jumps to the end. Terminal output stays fixed while reading.
+  xterm retains 10,000 normal-buffer lines, but only a fullscreen program's
+  current screen. It cannot reconstruct overwritten application text.
+- While Codex or Claude Code is running, choose **Codex history** or **Claude
+  history** in the reader. This opens the tool's own transcript using its
+  default Ctrl+T or Ctrl+O binding. Earlier messages come from the application.
+- In an app history source, **Previous** / **Next** first scroll the visible
+  text, then send PageUp / PageDown at its boundary. **Latest** sends Ctrl+End
+  for Codex and Claude fullscreen views, or End for Codex's classic pager.
+  Codex's binding is chosen from the buffer mode before opening its history.
+  Inline transcripts use retained terminal scrollback instead.
+  Up/Down prompt-history keys are never
+  sent by these controls.
+- App pages follow returned output, pausing replacement during native text
+  selection. **Back to terminal**, Escape, or switching back to **Terminal
+  output** sends the selected app's transcript toggle once to leave it.
+  Closing the reader clears copied text. Disconnected controls send nothing.
+  These shortcuts require the matching running tool and its default bindings.
 - Tap the terminal to focus the software keyboard. Mobile pages do not focus
   the terminal automatically when the WebSocket connects.
 - Hold for 450 ms to select a word and open Copy / Paste / Select all / Done.
@@ -108,6 +121,18 @@ The output reader is checked with actual Chromium touch and desktop wheel
 scrolling. Mobile WebKit cannot synthesize either native touch scrolling or
 wheel input in Playwright; its tests verify uncancelled touch events and DOM
 scrollability. Native iOS inertia and selection callouts remain device checks.
+Paging checks include older application pages arriving as text/binary WebSocket
+frames, source changes, selection preservation and disconnects. These fixtures
+verify the browser protocol.
+
+Run `make test TEST_TARGETS=test-terminal-apps` for native CLI acceptance through
+a real PTY and the shipped page. It requires installed `codex` and `claude` CLIs
+and uses disposable conversations/configuration with loopback service fixtures.
+No model calls or user conversations are used. Codex 0.163.0 and Claude Code
+2.1.303 pass in fullscreen and inline modes: all 120 history markers are visible
+while paging, Latest returns to the last marker, and closing preserves the draft
+and insertion point. These checks do not establish compatibility with the user's
+guest versions, remapped shortcuts or terminal multiplexers.
 
 For a host-recorded test run, use
 `make test TEST_TARGETS="test-go test-terminal-ui"`. The default `make test`

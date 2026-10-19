@@ -180,7 +180,7 @@ async def browse_output(page, touch=None):
     await page.get_by_role("button", name="Browse output", exact=True).click()
     assert "saved output 0" in await page.locator("#output-history").text_content()
     assert "fullscreen current" in await page.locator("#output-screen").text_content()
-    assert "overwritten" in await page.locator("#output-help").text_content()
+    assert "Choose" in await page.locator("#output-help").text_content()
     browser_name = page.context.browser.browser_type.name
     await page.screenshot(path=str(OUT / f"{browser_name}-output-{page.viewport_size['width']}.png"))
     await scroll.evaluate("e => { e.scrollTop = 0; }")
@@ -191,6 +191,110 @@ async def browse_output(page, touch=None):
     assert await page.evaluate("sent.filter(x => typeof x !== 'string' || !x.startsWith('{')).length") == 0
     await page.wait_for_function("document.querySelector('#output-screen').textContent === ''")
     assert await page.locator("#output-screen").text_content() == ""
+
+
+async def history_paging(page):
+    await write(page, "\r\n".join(f"older output {i}" for i in range(1200)))
+    await page.evaluate("window.sent = []")
+    await page.get_by_role("button", name="Browse output", exact=True).click()
+    reader = page.locator("#output-dialog")
+    scroll = page.locator("#output-scroll")
+    previous = reader.get_by_role("button", name="Previous page", exact=True)
+    following = reader.get_by_role("button", name="Next page", exact=True)
+    bottom = await scroll.evaluate("e => e.scrollTop")
+    height = await scroll.evaluate("e => e.clientHeight")
+    for _ in range(4):
+        await previous.click()
+    earlier = await scroll.evaluate("e => e.scrollTop")
+    assert bottom - earlier > height * 3
+    await following.click()
+    assert await scroll.evaluate("e => e.scrollTop") > earlier
+    await reader.get_by_role("button", name="Latest", exact=True).click()
+    assert await scroll.evaluate("e => e.scrollTop") == bottom
+    assert await page.evaluate("sent.filter(x => typeof x !== 'string' || !x.startsWith('{')).length") == 0
+
+    source = reader.get_by_role("combobox", name="Output source")
+    for app, toggle, latest in (("codex", "\x14", "\x1b[F"), ("claude", "\x0f", "\x1b[1;5F")):
+        await page.evaluate("window.sent = []")
+        await source.select_option(app)
+        assert await page.evaluate("sent.join('')") == toggle
+        # The application owns older messages. Deliver its redraw over the
+        # real websocket input path; they never existed in normal scrollback.
+        await page.evaluate("socket.onmessage({data: '\\x1b[?1049h\\x1b[2J\\x1b[Happ latest'})")
+        await page.wait_for_function("document.querySelector('#output-history').textContent.includes('app latest')")
+        for i in range(3):
+            sent_count = await page.evaluate("sent.length")
+            await previous.click()
+            assert await page.evaluate("sent.length") == sent_count + 1
+            assert await page.evaluate("sent[sent.length - 1]") == "\x1b[5~"
+            await page.evaluate("""i => socket.onmessage({data: new TextEncoder().encode(
+                '\\x1b[2J\\x1b[Happ older page ' + i + ' 中文').buffer})""", i)
+            await page.wait_for_function("i => document.querySelector('#output-history').textContent.includes('app older page ' + i)", arg=i)
+        # Read the rest of a large returned page before requesting another.
+        rows = await page.evaluate("testTerm.rows")
+        await write(page, "\x1b[2J\x1b[H" + "\r\n".join(f"app long page {i}" for i in range(rows)), reset=False)
+        await page.wait_for_function("document.querySelector('#output-history').textContent.includes('app long page 0')")
+        await scroll.evaluate("e => { e.scrollTop = e.scrollHeight; }")
+        page_bottom = await scroll.evaluate("e => e.scrollTop")
+        assert page_bottom > 0
+        await page.evaluate("window.sent = []")
+        await previous.click()
+        assert await scroll.evaluate("e => e.scrollTop") < page_bottom
+        assert await page.evaluate("sent.length") == 0
+        await scroll.evaluate("e => { e.scrollTop = 0; }")
+        await previous.click()
+        assert await page.evaluate("sent.join('')") == "\x1b[5~"
+        await write(page, "\x1b[2J\x1b[Happ earlier screen", reset=False)
+        await page.wait_for_function("document.querySelector('#output-history').textContent.includes('app earlier screen')")
+        await following.click()
+        assert await page.evaluate("sent[sent.length - 1]") == "\x1b[6~"
+        await reader.get_by_role("button", name="Latest", exact=True).click()
+        assert await page.evaluate("sent[sent.length - 1]") == latest
+        # Live app redraws must not destroy native text selection during copy.
+        await page.evaluate("""() => {
+          const range = document.createRange();
+          range.selectNodeContents(document.querySelector('#output-history'));
+          getSelection().removeAllRanges(); getSelection().addRange(range);
+        }""")
+        selected = await page.evaluate("getSelection().toString()")
+        await write(page, "\x1b[2J\x1b[Hnew app output", reset=False)
+        assert await page.evaluate("getSelection().toString()") == selected
+        await page.evaluate("getSelection().removeAllRanges()")
+        await reader.get_by_role("button", name="Refresh", exact=True).click()
+        assert "new app output" in await page.locator("#output-history").text_content()
+        await source.select_option("terminal")
+        assert await page.evaluate("sent[sent.length - 1]") == toggle
+        await page.evaluate("socket.onmessage({data: '\\x1b[?1049l'})")
+        await page.wait_for_function("document.querySelector('#output-history').textContent.includes('older output 0')")
+
+    # Closing exits only an explicitly selected app transcript, exactly once.
+    await source.select_option("codex")
+    await page.evaluate("window.sent = []")
+    await reader.get_by_role("button", name="Back to terminal", exact=True).click()
+    await page.wait_for_function("sent.length === 1")
+    assert await page.evaluate("sent.join('')") == "\x14"
+    assert await page.locator("#output-source").input_value() == "terminal"
+    await page.get_by_role("button", name="Browse output", exact=True).click()
+    await source.select_option("claude")
+    await page.evaluate("window.sent = []")
+    await page.keyboard.press("Escape")
+    await page.wait_for_function("sent.length === 1")
+    assert await page.evaluate("sent.join('')") == "\x0f"
+    await page.get_by_role("button", name="Browse output", exact=True).click()
+    await source.select_option("claude")
+    await page.evaluate("window.sent = []; socket.readyState = 3")
+    await previous.click()
+    assert "Disconnected" in await page.locator("#output-help").text_content()
+    await reader.get_by_role("button", name="Back to terminal", exact=True).click()
+    await page.wait_for_function("document.querySelector('#output-source').value === 'terminal'")
+    assert await page.evaluate("sent.length") == 0
+    await page.get_by_role("button", name="Browse output", exact=True).click()
+    await source.select_option("codex")
+    assert await source.input_value() == "terminal"
+    assert await page.evaluate("sent.length") == 0
+    await page.keyboard.press("Escape")
+    await page.wait_for_function("!document.querySelector('#output-dialog').open")
+    await page.evaluate("socket.readyState = 1")
 
 
 async def mobile(browser, name, sources, chromium=False):
@@ -216,6 +320,7 @@ async def mobile(browser, name, sources, chromium=False):
     assert await page.evaluate("socket.binaryType") == "arraybuffer"
     assert not await page.evaluate("document.activeElement === testTerm.textarea"), "Mobile must not autofocus"
     touch = Touch(page, await context.new_cdp_session(page) if chromium else None)
+    await history_paging(page)
     await browse_output(page, touch)
     menu = page.locator("#selection-menu")
 
@@ -393,7 +498,7 @@ async def mobile(browser, name, sources, chromium=False):
         reader_box = await reader.bounding_box()
         assert reader_box["x"] >= 0 and reader_box["x"] + reader_box["width"] <= width + 1
         assert reader_box["y"] >= 0 and reader_box["y"] + reader_box["height"] <= height + 1
-        assert await page.locator("#output-scroll").evaluate("e => e.clientHeight") > 40
+        assert await page.locator("#output-scroll").evaluate("e => e.clientHeight") >= height * .6
         await page.screenshot(path=str(OUT / f"{name}-reader-{width}x{height}.png"))
         await reader.get_by_role("button", name="Back to terminal", exact=True).click()
         await touch.hold(*await point(page, 8, 0))
@@ -442,6 +547,7 @@ async def desktop(browser, sources):
     await page.keyboard.type("pwd")
     await page.keyboard.press("Enter")
     assert await page.evaluate("sent.filter(x => !x.startsWith('{')).join('')") == "pwd\r"
+    await history_paging(page)
     await browse_output(page)
     await write(page, "selectable output line")
     await page.get_by_role("button", name="Browse output", exact=True).click()
@@ -474,4 +580,5 @@ async def main():
             await browser.close()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

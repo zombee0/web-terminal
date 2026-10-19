@@ -27,19 +27,26 @@
   <dialog id="output-dialog" aria-labelledby="output-title" aria-describedby="output-help">
     <div class="output-heading">
       <h2 id="output-title">Terminal output</h2>
+      <select id="output-source" aria-label="Output source" title="Choose the running tool from its input view, using default history shortcuts.">
+        <option value="terminal">Terminal output</option>
+        <option value="codex">Codex history</option>
+        <option value="claude">Claude history</option>
+      </select>
       <button type="button" id="output-close" autofocus>Back to terminal</button>
     </div>
     <p id="output-help"></p>
-    <div class="output-actions">
-      <button type="button" id="output-refresh">Refresh</button>
-      <button type="button" id="output-latest">Latest</button>
-    </div>
     <div id="output-scroll" tabindex="0" aria-label="Scrollable terminal output">
       <pre id="output-history"></pre>
       <section id="output-current" hidden>
         <h3>Current screen</h3>
         <pre id="output-screen"></pre>
       </section>
+    </div>
+    <div class="output-actions">
+      <button type="button" id="output-previous" aria-label="Previous page">Previous</button>
+      <button type="button" id="output-next" aria-label="Next page">Next</button>
+      <button type="button" id="output-latest">Latest</button>
+      <button type="button" id="output-refresh">Refresh</button>
     </div>
   </dialog>
   <dialog id="clipboard-dialog" aria-labelledby="clipboard-title" aria-describedby="clipboard-help">
