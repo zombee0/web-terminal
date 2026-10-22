@@ -42,7 +42,11 @@
     if (typeof event.data === 'string') {
       try {
         const message = JSON.parse(event.data);
-        if (message.type === 'browse-ready') { nativeSupported = !!message.tmux; return; }
+        if (message.type === 'browse-ready') {
+          browseReady = true;
+          nativeSupported = !!message.tmux;
+          return;
+        }
         if (message.type === 'tmux-browse') { receiveBrowse(message); return; }
       } catch { /* Older servers may send terminal text frames. */ }
     }
@@ -78,6 +82,7 @@
   const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
   const browseButton = document.querySelector('#browse-output');
   const browseStatus = document.querySelector('#browse-status');
+  let browseReady = false; // Older guest services never announce browsing.
   let nativeSupported = false;
   let browsing = false;
   let browseOpening = false;
@@ -131,6 +136,7 @@
     cancelGesture();
     dismiss();
     term.blur();
+    if (!browseReady) { tell('Update this Box to browse output: Stop, then Resume it.'); return; }
     if (!nativeSupported) { tell('Start tmux to browse output.'); return; }
     browseOpening = true;
     browseButton.disabled = true;

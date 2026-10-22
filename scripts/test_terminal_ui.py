@@ -38,7 +38,7 @@ FIXTURE = """() => {
       window.socket = this;
       setTimeout(() => {
         this.onopen?.();
-        this.onmessage?.({data: JSON.stringify({type: 'browse-ready', tmux: !window.disableTmux})});
+        if (!window.legacyGuest) this.onmessage?.({data: JSON.stringify({type: 'browse-ready', tmux: !window.disableTmux})});
       }, 0);
     }
     send(data) {
@@ -351,7 +351,7 @@ async def mobile(browser, name, sources, chromium=False):
     await write(page, "\x1b[?1006l", reset=False)
     await page.evaluate("window.sent = []")
     await touch.swipe(150, 400, 250)
-    reports = await page.evaluate("sent.map(data => Array.from(data))")
+    reports = await page.evaluate("sent.filter(data => typeof data !== 'string' || !data.startsWith('{')).map(data => Array.from(data))")
     assert reports and all(report[:4] == [27, 91, 77, 97] and len(report) == 6 for report in reports), reports
     # Alternate screen without mouse mode still uses xterm's cursor-key behavior.
     await write(page, "\x1b[?1000l\x1b[?1006l", reset=False)
@@ -431,6 +431,14 @@ async def desktop(browser, sources):
     await page.evaluate('window.sent = []')
     await page.get_by_role('button', name='Browse output', exact=True).click()
     await page.wait_for_function("document.querySelector('#notice').textContent.includes('Start tmux')")
+    assert await page.evaluate('sent.every(x => JSON.parse(x).type === "resize")')
+    # A guest service from before browsing existed asks for an update instead.
+    await context.add_init_script('window.legacyGuest = true')
+    await page.reload()
+    await page.wait_for_function('window.testTerm && window.sent.length > 0')
+    await page.evaluate('window.sent = []')
+    await page.get_by_role('button', name='Browse output', exact=True).click()
+    await page.wait_for_function("document.querySelector('#notice').textContent.includes('Stop, then Resume')")
     assert await page.evaluate('sent.every(x => JSON.parse(x).type === "resize")')
     await context.close()
     print("PASS desktop: tmux browse mode via wheel, mouse selection, typing/Enter, root websocket, optional addon failure", flush=True)
