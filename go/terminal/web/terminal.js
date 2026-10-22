@@ -38,15 +38,29 @@
     sendSize();
     if (!coarsePointer.matches) term.focus();
   };
-  ws.onmessage = event => term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
-  ws.onclose = () => term.write('\r\n[Connection closed]\r\n');
+  ws.onmessage = event => {
+    if (typeof event.data === 'string') {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'browse-ready') { nativeSupported = !!message.tmux; return; }
+        if (message.type === 'tmux-browse') { receiveBrowse(message); return; }
+      } catch { /* Older servers may send terminal text frames. */ }
+    }
+    term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
+  };
+  ws.onclose = () => {
+    setBrowsing(false);
+    term.write('\r\n[Connection closed]\r\n');
+  };
   ws.onerror = () => term.write('\r\n[Connection error]\r\n');
   term.onData(data => {
+    if (reading()) return;
     dismiss();
-    if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data).buffer);
   });
   // Legacy mouse protocols emit raw bytes, not UTF-8 text.
   term.onBinary(data => {
+    if (reading()) return;
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(Uint8Array.from(data, char => char.charCodeAt(0)));
     }
@@ -62,6 +76,117 @@
   let lastTouch = 0;
   let clipboardBusy = false;
   const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
+  const browseButton = document.querySelector('#browse-output');
+  const browseStatus = document.querySelector('#browse-status');
+  let nativeSupported = false;
+  let browsing = false;
+  let browseOpening = false;
+  let browseID = 0;
+  const browseRequests = new Map();
+  let scrollQueued = 0;
+  let scrollSending = false;
+  let scrollTimer = 0;
+
+  function setBrowsing(active, state = {}) {
+    if (browsing !== active) {
+      cancelGesture();
+      dismiss();
+      scrollQueued = 0;
+    }
+    browsing = active;
+    browseButton.textContent = active ? 'Back to terminal' : 'Browse output';
+    browseButton.setAttribute('aria-pressed', String(active));
+    browseStatus.hidden = !active;
+    browseStatus.textContent = active && state.position >= state.history
+      ? 'Top of history' : 'Swipe to read history';
+    menu.querySelector('[data-action="paste"]').disabled = active;
+  }
+
+  function reading() { return browsing || browseOpening; }
+
+  function requestBrowse(action, lines = 0) {
+    if (ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Terminal is disconnected.'));
+    return new Promise((resolve, reject) => {
+      const id = ++browseID;
+      const timer = setTimeout(() => {
+        browseRequests.delete(id);
+        reject(new Error('Browsing timed out. Try again.'));
+      }, 6000);
+      browseRequests.set(id, { resolve, reject, timer });
+      ws.send(JSON.stringify({ type: 'tmux-browse', id, action, lines }));
+    });
+  }
+
+  function receiveBrowse(state) {
+    const request = browseRequests.get(state.id);
+    if (!request) return;
+    clearTimeout(request.timer);
+    browseRequests.delete(state.id);
+    if (state.error) { request.reject(new Error(state.error)); return; }
+    setBrowsing(state.active, state);
+    request.resolve(state);
+  }
+
+  async function enterBrowse() {
+    cancelGesture();
+    dismiss();
+    term.blur();
+    if (!nativeSupported) { tell('Start tmux to browse output.'); return; }
+    browseOpening = true;
+    browseButton.disabled = true;
+    try {
+      const state = await requestBrowse('enter');
+      if (!state.available) tell('Start tmux to browse output.');
+    } catch (error) { tell(error.message); }
+    finally { browseOpening = false; browseButton.disabled = false; }
+  }
+
+  async function leaveBrowse() {
+    scrollQueued = 0;
+    clearTimeout(scrollTimer);
+    scrollTimer = 0;
+    cancelGesture();
+    dismiss();
+    await requestBrowse('leave');
+    // A tap on the terminal, rather than leaving history, opens the keyboard.
+    term.blur();
+  }
+
+  function queueBrowseScroll(lines) {
+    if (!browsing) return;
+    scrollQueued = clamp(scrollQueued + lines, -1000, 1000);
+    if (scrollSending || scrollTimer) return;
+    scrollTimer = setTimeout(async () => {
+      scrollTimer = 0;
+      if (!browsing || !scrollQueued) return;
+      const count = scrollQueued;
+      scrollQueued = 0;
+      scrollSending = true;
+      try { await requestBrowse('scroll', count); }
+      catch (error) { scrollQueued = 0; tell(error.message); }
+      finally {
+        scrollSending = false;
+        if (scrollQueued) queueBrowseScroll(0);
+      }
+    }, 30);
+  }
+
+  // Also reflect copy mode entered through the user's own tmux prefix.
+  const browsePoll = setInterval(() => {
+    if (ws.readyState === WebSocket.CLOSED) { clearInterval(browsePoll); return; }
+    if (!nativeSupported || browseRequests.size || selecting ||
+        document.hidden || term.buffer.active.type !== 'alternate') return;
+    requestBrowse('state').catch(() => {});
+  }, 1200);
+
+  host.addEventListener('wheel', event => {
+    if (!browsing || event.ctrlKey) return;
+    stopEvent(event);
+    dismiss();
+    const { height } = geometry();
+    const pixels = event.deltaY * (event.deltaMode === 1 ? height : event.deltaMode === 2 ? height * term.rows : 1);
+    queueBrowseScroll(Math.sign(pixels) * Math.max(1, Math.round(Math.abs(pixels) / height)));
+  }, { passive: false, capture: true });
 
   function sendSize() {
     if (ws.readyState === WebSocket.OPEN) {
@@ -291,6 +416,7 @@
     const lines = Math.trunc(gesture.remainder);
     gesture.remainder -= lines;
     if (!lines) return;
+    if (browsing) { queueBrowseScroll(lines); return; }
     if (term.buffer.active.type === 'normal' && term.modes.mouseTrackingMode === 'none') {
       term.scrollLines(lines);
     } else {
@@ -332,7 +458,7 @@
     cancelGesture();
     if (g.mode === 'pending') {
       dismiss();
-      if (!g.hadSelection) term.focus();
+      if (!g.hadSelection && !browsing && !browseOpening) term.focus();
     }
     renderSelection();
   }, { passive: false, capture: true });
@@ -347,163 +473,23 @@
     if (event.key === 'Escape' && selecting && !dialog.open) {
       stopEvent(event);
       dismiss();
+      return;
+    }
+    if (browsing && !dialog.open) {
+      if (event.key === 'Tab' || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.target.closest('button') && (event.key === 'Enter' || event.key === ' ')) return;
+      stopEvent(event);
+      if (event.key === 'Escape' || event.key === 'q') leaveBrowse().catch(error => tell(error.message));
+      if (event.key === 'ArrowUp') queueBrowseScroll(-1);
+      if (event.key === 'ArrowDown') queueBrowseScroll(1);
+      if (event.key === 'PageUp') queueBrowseScroll(-Math.max(1, term.rows - 2));
+      if (event.key === 'PageDown') queueBrowseScroll(Math.max(1, term.rows - 2));
     }
   }, { capture: true });
 
-  const outputDialog = document.querySelector('#output-dialog');
-  const outputScroll = document.querySelector('#output-scroll');
-  const outputHistory = document.querySelector('#output-history');
-  const outputScreen = document.querySelector('#output-screen');
-  const outputSource = document.querySelector('#output-source');
-  const outputHelp = document.querySelector('#output-help');
-  const historyKeys = {
-    codex: { enter: '\x14', leave: '\x14', latest: '\x1b[F' },
-    claude: { enter: '\x0f', leave: '\x0f', latest: '\x1b[1;5F' },
-    // Reopen copy mode at the bottom for Latest. These default keys work in
-    // both vi and emacs modes without typing a command or submitting Enter.
-    tmux: { enter: '\x02[', leave: 'q', latest: 'q\x02[' }
-  };
-  let outputApp = '';
-  let outputLatestKey = '';
-  let outputFrame = 0;
-  let outputNeedsRefresh = false;
-  let outputPageDirection = 0;
-
-  function bufferText(buffer, firstRow = 0) {
-    const parts = [];
-    for (let row = firstRow; row < buffer.length; row++) {
-      const line = buffer.getLine(row);
-      const wrapped = buffer.getLine(row + 1)?.isWrapped;
-      let end = line.length;
-      if (wrapped) {
-        // A wide character can leave an unused cell before wrapping. Remove
-        // that padding, but retain actual spaces at a logical line boundary.
-        while (end > 0) {
-          const cell = line.getCell(end - 1);
-          if (cell.getWidth() !== 1 || cell.getChars()) break;
-          end--;
-        }
-      }
-      parts.push(line.translateToString(!wrapped, 0, end));
-      if (!wrapped) parts.push('\n');
-    }
-    return parts.join('').replace(/\n+$/, '');
-  }
-
-  function refreshOutput() {
-    const position = outputScroll.scrollTop;
-    const atLatest = outputScroll.scrollHeight - position - outputScroll.clientHeight < 2;
-    const fullscreen = term.buffer.active.type === 'alternate';
-    const buffer = outputApp ? term.buffer.active : term.buffer.normal;
-    const text = bufferText(buffer, outputApp === 'tmux' ? buffer.baseY : 0);
-    // Avoid replacing selected DOM text when an app repaints an unchanged page.
-    if (outputHistory.textContent !== text) outputHistory.textContent = text;
-    outputScreen.textContent = fullscreen && !outputApp ? bufferText(term.buffer.alternate) : '';
-    document.querySelector('#output-current').hidden = !fullscreen || !!outputApp;
-    outputHelp.textContent = outputApp
-      ? (ws.readyState === WebSocket.OPEN ? 'Previous / Next to browse app history.' : 'Disconnected. Saved text is still readable.')
-      : (fullscreen ? 'More output? Choose Tmux history or your app above.' : 'Previous / Next to read more output.');
-    outputScroll.scrollTop = outputPageDirection
-      ? (outputPageDirection < 0 ? outputScroll.scrollHeight : 0)
-      : (atLatest ? outputScroll.scrollHeight : position);
-    outputPageDirection = 0;
-  }
-
-  function sendHistoryKey(key) {
-    if (ws.readyState !== WebSocket.OPEN) {
-      outputHelp.textContent = 'Disconnected. Saved text is still readable.';
-      return false;
-    }
-    const selection = getSelection();
-    if (outputScroll.contains(selection?.anchorNode)) selection.removeAllRanges();
-    ws.send(key);
-    return true;
-  }
-
-  function leaveAppHistory() {
-    if (outputApp && ws.readyState === WebSocket.OPEN) ws.send(historyKeys[outputApp].leave);
-    outputApp = '';
-    outputLatestKey = '';
-    outputSource.value = 'terminal';
-  }
-
-  outputSource.addEventListener('change', () => {
-    const next = outputSource.value;
-    if (next === (outputApp || 'terminal')) return;
-    if (next !== 'terminal' && ws.readyState !== WebSocket.OPEN) {
-      outputSource.value = outputApp || 'terminal';
-      outputHelp.textContent = 'Disconnected. Saved text is still readable.';
-      return;
-    }
-    leaveAppHistory();
-    outputSource.value = next;
-    outputApp = next === 'terminal' ? '' : next;
-    if (outputApp) {
-      // Codex's owned fullscreen transcript uses Ctrl+End; its classic
-      // inline UI opens a separate pager whose bottom shortcut is End.
-      outputLatestKey = outputApp === 'codex' && term.buffer.active.type === 'alternate'
-        ? '\x1b[1;5F' : historyKeys[outputApp].latest;
-      sendHistoryKey(historyKeys[outputApp].enter);
-    }
-    outputNeedsRefresh = true; // Capture the response to entering/leaving a transcript.
-    refreshOutput();
-    outputScroll.scrollTop = outputScroll.scrollHeight;
-  });
-
-  term.onWriteParsed(() => {
-    if (!outputDialog.open || (!outputApp && !outputNeedsRefresh)) return;
-    cancelAnimationFrame(outputFrame);
-    outputFrame = requestAnimationFrame(() => {
-      if (!outputDialog.open) return;
-      const selection = getSelection();
-      if (selection?.toString() && outputScroll.contains(selection.anchorNode)) return;
-      outputNeedsRefresh = false;
-      refreshOutput();
-    });
-  });
-
-  function canPageApp() {
-    return outputApp && (outputApp === 'tmux' || term.buffer.active.type === 'alternate');
-  }
-
-  function pageOutput(direction) {
-    if (outputApp && ws.readyState !== WebSocket.OPEN) {
-      outputHelp.textContent = 'Disconnected. Saved text is still readable.';
-    }
-    const position = outputScroll.scrollTop;
-    const next = clamp(position + direction * Math.max(1, outputScroll.clientHeight - 36),
-      0, outputScroll.scrollHeight - outputScroll.clientHeight);
-    if (Math.abs(next - position) > 1 || !canPageApp()) {
-      outputScroll.scrollTop = next;
-      return;
-    }
-    // Page within the running tool only after the current text page is read.
-    // Arrow keys would navigate prompt history instead.
-    if (sendHistoryKey(direction < 0 ? '\x1b[5~' : '\x1b[6~')) outputPageDirection = direction;
-  }
-
-  document.querySelector('#browse-output').addEventListener('click', () => {
-    cancelGesture();
-    dismiss();
-    term.blur();
-    outputDialog.showModal();
-    refreshOutput();
-    outputScroll.scrollTop = outputScroll.scrollHeight;
-  });
-  document.querySelector('#output-refresh').addEventListener('click', refreshOutput);
-  document.querySelector('#output-previous').addEventListener('click', () => pageOutput(-1));
-  document.querySelector('#output-next').addEventListener('click', () => pageOutput(1));
-  document.querySelector('#output-latest').addEventListener('click', () => {
-    if (canPageApp()) sendHistoryKey(outputLatestKey);
-    outputScroll.scrollTop = outputScroll.scrollHeight;
-  });
-  document.querySelector('#output-close').addEventListener('click', () => outputDialog.close());
-  outputDialog.addEventListener('close', () => {
-    leaveAppHistory();
-    cancelAnimationFrame(outputFrame);
-    outputNeedsRefresh = false;
-    outputPageDirection = 0;
-    outputHistory.textContent = outputScreen.textContent = '';
+  browseButton.addEventListener('click', () => {
+    if (browsing) leaveBrowse().catch(error => tell(error.message));
+    else enterBrowse();
   });
 
   function openClipboard(mode, text = '') {
@@ -530,6 +516,7 @@
   }
 
   function paste(text) {
+    if (reading()) { tell('Return to terminal before pasting.'); return false; }
     if (!connected()) return false;
     if (!text) { tell('Nothing to paste.'); return false; }
     dismiss();

@@ -8,6 +8,8 @@ button:active { background: #344c65; }
 button:focus-visible { outline: 2px solid #78b7ff; outline-offset: -2px; }
 #app { position: absolute; top: 0; left: 0; width: 100%; max-width: 100%; height: 100%; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 #terminal-actions { display: flex; justify-content: flex-end; flex-shrink: 0; border-bottom: 1px solid #263a4d; background: #131c26; }
+#browse-status { flex: 1; align-self: center; padding-left: 8px; font-size: 11px; color: #aebfd0; }
+#terminal-actions button { white-space: nowrap; padding: 0 8px; }
 #term { flex: 1; min-height: 0; width: 100%; touch-action: pinch-zoom; }
 /* Keep native selection/callouts available in the clipboard fallback field. */
 #term, .selection-handle { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
@@ -34,18 +36,3 @@ dialog p { margin: 0 0 16px; color: #aebfd0; line-height: 1.5; }
 dialog textarea { display: block; width: 100%; height: 140px; max-height: calc(var(--viewport-height, 100dvh) * .3); padding: 12px; border: 1px solid #41566d; border-radius: 8px; background: #090d12; color: #d5e1eb; font: 16px ui-monospace, monospace; resize: vertical; -webkit-user-select: text; user-select: text; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 #clipboard-submit { background: #284b6d; }
-#output-dialog { width: min(900px, calc(100% - 24px)); height: calc(var(--viewport-height, 100dvh) - 24px); padding: 12px; overflow: hidden; }
-#output-dialog[open] { display: flex; flex-direction: column; }
-.output-heading, .output-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
-.output-heading h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-#output-source { flex: 1; min-width: 0; min-height: 44px; padding: 0 4px; border: 0; background: #131c26; color: inherit; font: 16px system-ui; }
-#output-close { max-width: 50%; }
-#output-help { flex-shrink: 0; margin: 4px 0; font-size: 12px; }
-.output-actions { gap: 0; border-top: 1px solid #41566d; }
-.output-actions button { flex: 1; min-width: 0; padding: 0 6px; }
-#output-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px 4px; touch-action: pan-y pinch-zoom; overscroll-behavior: contain; -webkit-user-select: text; user-select: text; }
-#output-scroll pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.5 ui-monospace, monospace; }
-#output-current h3 { margin: 24px 0 12px; color: #aebfd0; font-size: 14px; }
-@media (max-width: 600px), (max-height: 500px) {
-  #output-dialog { width: 100%; max-width: 100%; height: var(--viewport-height, 100dvh); max-height: var(--viewport-height, 100dvh); padding: max(4px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border: 0; border-radius: 0; }
-}

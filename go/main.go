@@ -12,6 +12,9 @@ import (
 )
 
 func main() {
+	if terminal.RunTmuxWrapper() {
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--print-page" {
 		fmt.Print(terminal.PageHTML())
 		return

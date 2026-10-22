@@ -66,36 +66,26 @@ able to reach that CDN.
 
 ### Phone interaction
 
-- Tap **Browse output** for a full-height mobile reading view. **Terminal
-  output** shows retained history; swipe or use **Previous** / **Next** to
-  page through it. Native selection and paging in this source send no input.
-- **Refresh** loads new output while preserving an earlier reading position;
-  **Latest** jumps to the end. Terminal output stays fixed while reading.
-  xterm retains 10,000 normal-buffer lines, but only a fullscreen program's
-  current screen. It cannot reconstruct overwritten application text.
-- While attached to tmux, choose **Tmux history (Ctrl+B)**. This enters tmux's
-  copy mode and reads the pane's retained history. **Previous** / **Next** scroll
-  the displayed page, then send PageUp / PageDown to tmux. **Latest** exits and
-  reopens copy mode at the bottom. **Back to terminal**, Escape or changing the
-  source exits copy mode with `q`, preserving the pane's input draft.
-  This supports default Ctrl+B / `[` / `q` bindings with vi or emacs mode keys.
-  Custom bindings and nested tmux require manual navigation. History capacity
-  belongs to tmux; the reader does not change it or recover discarded lines.
-- While Codex or Claude Code is running, choose **Codex history** or **Claude
-  history** in the reader. This opens the tool's own transcript using its
-  default Ctrl+T or Ctrl+O binding. Earlier messages come from the application.
-- In an app history source, **Previous** / **Next** first scroll the visible
-  text, then send PageUp / PageDown at its boundary. **Latest** sends Ctrl+End
-  for Codex and Claude fullscreen views, or End for Codex's classic pager.
-  Codex's binding is chosen from the buffer mode before opening its history.
-  Inline transcripts use retained terminal scrollback instead.
-  Up/Down prompt-history keys are never
-  sent by these controls.
-- App pages follow returned output, pausing replacement during native text
-  selection. **Back to terminal**, Escape, or switching back to **Terminal
-  output** sends the selected app's exit binding once to leave it.
-  Closing the reader clears copied text. Disconnected controls send nothing.
-  These shortcuts require the matching running tool and its default bindings.
+- Inside tmux, tap **Browse output** to put the attached pane into tmux's own
+  copy mode, in place; the same toolbar button then reads **Back to terminal**.
+  Swipe down for older rows and up for newer ones; desktop wheel, arrow and
+  Page keys do the same. This includes output above a full-screen program such
+  as Codex or Claude Code, because tmux keeps the shell's earlier rows as pane
+  history. At tmux's oldest retained row, browsing simply stays at the top
+  (`history-limit` sets how far back that is). **Back to terminal**, Escape or
+  `q` cancel copy mode; the program's screen, the shell draft and its caret are
+  unchanged. Copy mode entered with the user's own tmux prefix also switches
+  the toolbar. Outside tmux, swipes scroll xterm's own scrollback.
+- A transparent `tmux` wrapper, first on the shell's PATH, runs the real tmux
+  and pairs that client with this WebSocket over a private Unix socket. The
+  service sends `browse-ready` first; browse requests are text frames and
+  terminal input is binary, so JSON typed by the user stays shell input. The
+  service only issues `copy-mode` and `send-keys -X` commands to the paired
+  client's pane, never keystrokes into the application, and cancels copy mode
+  it started when the browser disconnects. The pairing address is kept out of
+  the tmux server environment. Nothing is recorded to disk. The wrapper lives
+  in `/var/lib/web-terminal/bin` (root-owned) for the protected service, or
+  `~/.local/state/web-terminal/bin` for standalone use.
 - Tap the terminal to focus the software keyboard. Mobile pages do not focus
   the terminal automatically when the WebSocket connects.
 - Hold for 450 ms to select a word and open Copy / Paste / Select all / Done.
@@ -125,34 +115,22 @@ pinned CDN assets into `build/terminal-ui/`; screenshots are written there too.
 WebSocket and clipboard fixtures are isolated from real Boxes and clipboards.
 Real iPhone/Android checks are still needed for system clipboard permissions,
 native selection callouts and the software keyboard itself.
-The output reader is checked with actual Chromium touch and desktop wheel
-scrolling. Mobile WebKit cannot synthesize either native touch scrolling or
-wheel input in Playwright; its tests verify uncancelled touch events and DOM
-scrollability. Native iOS inertia and selection callouts remain device checks.
-Paging checks include older application pages arriving as text/binary WebSocket
-frames, source changes, selection preservation and disconnects. These fixtures
-verify the browser protocol.
+Browse mode is checked against a mocked tmux pairing with Chromium touch,
+WebKit DOM touch events and desktop wheel input, at several phone viewports.
 
-Run `make test TEST_TARGETS=test-terminal-apps` for native CLI acceptance through
-a real PTY and the shipped page. It requires installed `codex` and `claude` CLIs
-and uses disposable conversations/configuration with loopback service fixtures.
-No model calls or user conversations are used. Codex 0.163.0 and Claude Code
-2.1.303 pass in fullscreen and inline modes: all 120 history markers are visible
-while paging, Latest returns to the last marker, and closing preserves the draft
-and insertion point. These checks do not establish compatibility with the user's
-guest versions or remapped shortcuts.
-
-Run `make test TEST_TARGETS=test-terminal-tmux` for tmux acceptance. It uses an
-isolated real tmux server with synthetic output, vi and emacs mode keys, and a
-mobile browser connected through a PTY. It checks all 120 numbered lines become
-visible, Next retrieves a newer page, Latest returns to the end, and closing
-preserves an unsubmitted shell draft and its insertion point. No existing tmux
-sessions or user conversation contents are read or changed.
+Run `make test TEST_TARGETS="test-go test-terminal-native"` for real tmux
+acceptance. `test-go` drives the production WebSocket/PTY loop against an
+isolated tmux server: pairing, copy mode over an alternate-screen program,
+the top boundary and cleanup on disconnect. `test-terminal-native` adds
+Chromium and WebKit on a phone viewport: bidirectional swipes, exact colored
+rows, long-press copy, vi and emacs mode keys, a custom prefix, mouse on/off,
+client isolation, a full-screen program over earlier shell output, and a
+preserved shell draft and caret. No existing tmux sessions are read or changed.
 
 For a host-recorded test run, use
 `make test TEST_TARGETS="test-go test-terminal-ui"`. The default `make test`
 suite is unchanged. The [mobile design and acceptance issue](https://github.com/zombee0/web-terminal/issues/2)
-records the approach, alternatives and outstanding phone checks.
+tracks this work.
 
 ## Authentication and Preview Access
 

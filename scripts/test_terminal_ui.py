@@ -17,6 +17,7 @@ OUT = ROOT / "build" / "terminal-ui"
 HTML = (OUT / "terminal.html").read_text()
 FIXTURE = """() => {
   window.sent = [];
+  window.tmux = {available: true, active: false, position: 0, history: 300};
   window.clipboardText = '';
   window.clipboardDenied = false;
   Object.defineProperty(navigator, 'clipboard', {value: {
@@ -35,9 +36,26 @@ FIXTURE = """() => {
       this.url = url;
       this.readyState = 1;
       window.socket = this;
-      setTimeout(() => this.onopen?.(), 0);
+      setTimeout(() => {
+        this.onopen?.();
+        this.onmessage?.({data: JSON.stringify({type: 'browse-ready', tmux: !window.disableTmux})});
+      }, 0);
     }
-    send(data) { window.sent.push(data); }
+    send(data) {
+      if (data instanceof ArrayBuffer) { window.sent.push(new TextDecoder().decode(data)); return; }
+      window.sent.push(data);
+      if (typeof data !== 'string') return;
+      const request = JSON.parse(data);
+      if (request.type !== 'tmux-browse') return;
+      // A tmux client paired with this browser, as the guest wrapper reports it.
+      const t = window.tmux;
+      if (request.action === 'enter' && t.available) t.active = true;
+      if (request.action === 'leave') { t.active = false; t.position = 0; }
+      if (request.action === 'scroll' && t.active) t.position = Math.max(0, Math.min(t.history, t.position - request.lines));
+      const reply = {type: 'tmux-browse', id: request.id, available: t.available,
+        active: t.available && t.active, position: t.position, history: t.history};
+      setTimeout(() => this.onmessage({data: JSON.stringify(reply)}), 5);
+    }
   };
 }"""
 
@@ -108,211 +126,50 @@ async def point(page, col, row):
     }""", {"col": col, "row": row})
 
 
-async def browse_output(page, touch=None):
-    cols = await page.evaluate("testTerm.cols")
-    wrapped = "x" * (cols - 1) + " 中文🙂 end"
-    wide_wrap = "w" * (cols - 1) + "中"
-    history = "\r\n".join([wrapped, wide_wrap, "<img src=x onerror=alert(1)>"] +
-                           [f"saved output {i}" for i in range(200)] + ["pending input"])
-    await write(page, history)
-    await page.evaluate("testTerm.blur(); window.sent = []")
-    cursor = await page.evaluate("[testTerm.buffer.active.cursorX, testTerm.buffer.active.cursorY]")
+async def browse_mode(page, touch=None):
+    """Browse output drives tmux copy mode in place: no separate reader."""
+    await page.evaluate("window.tmux = {available: true, active: false, position: 0, history: 300}; window.sent = []")
     await page.get_by_role("button", name="Browse output", exact=True).click()
-    reader = page.locator("#output-dialog")
-    scroll = page.locator("#output-scroll")
-    text = await page.locator("#output-history").text_content()
-    assert wrapped in text and wide_wrap in text, repr(text[:cols * 3])
-    assert "saved output 0" in text and "pending input" in text
-    assert "<img src=x onerror=alert(1)>" in text
-    assert await scroll.locator("img").count() == 0
-    await page.wait_for_function("document.querySelector('#output-scroll').scrollTop > 0")
-    bottom = await scroll.evaluate("e => e.scrollTop")
-    box = await scroll.bounding_box()
-    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    await page.wait_for_function("document.querySelector('#browse-output').textContent === 'Back to terminal'")
+    assert await page.locator("dialog[open]").count() == 0
+    assert await page.locator("#browse-status").text_content() == "Swipe to read history"
 
-    async def scroll_by(delta):
+    async def scroll(older):
+        x, y = await point(page, 10, 6)
         if touch:
-            await page.evaluate("""() => {
-              window.readerTouchPrevented = false;
-              document.addEventListener('touchmove', e => {
-                window.readerTouchPrevented = e.defaultPrevented;
-              }, {once: true});
-            }""")
-            direction = 1 if delta > 0 else -1
-            await touch.swipe(x, y + direction * 70, y - direction * 70)
-            assert not await page.evaluate("readerTouchPrevented")
-            if not touch.cdp:
-                # Mobile WebKit cannot synthesize native touch scrolling or
-                # wheel input. Check uncancelled events and DOM scrollability;
-                # native iOS scrolling still requires device acceptance.
-                await scroll.evaluate("(e, delta) => { e.scrollTop += delta; }", delta)
+            # A finger moving down reveals older rows, as in a native list.
+            await touch.swipe(x, y, y + 200) if older else await touch.swipe(x, y + 200, y)
         else:
             await page.mouse.move(x, y)
-            await page.mouse.wheel(0, delta)
+            await page.mouse.wheel(0, -400 if older else 400)
 
-    await scroll_by(-300)
-    await page.wait_for_function("bottom => document.querySelector('#output-scroll').scrollTop < bottom", arg=bottom)
-    await page.wait_for_timeout(200)
-    earlier = await scroll.evaluate("e => e.scrollTop")
-    await scroll_by(100)
-    await page.wait_for_function("earlier => document.querySelector('#output-scroll').scrollTop > earlier", arg=earlier)
-    assert await page.evaluate("[testTerm.buffer.active.cursorX, testTerm.buffer.active.cursorY]") == cursor
-    assert await page.evaluate("sent.filter(x => typeof x !== 'string' || !x.startsWith('{')).length") == 0
-    # Incoming output cannot replace a snapshot or move the reading position.
-    await scroll.evaluate("e => { e.scrollTop = 120; }")
-    await write(page, "\r\nnew background output", reset=False)
-    assert await page.locator("#output-history").text_content() == text
-    assert await scroll.evaluate("e => e.scrollTop") == 120
-    await reader.get_by_role("button", name="Refresh", exact=True).click()
-    assert "new background output" in await page.locator("#output-history").text_content()
-    assert await scroll.evaluate("e => e.scrollTop") == 120
-    await reader.get_by_role("button", name="Latest", exact=True).click()
-    assert await scroll.evaluate("e => e.scrollHeight - e.scrollTop - e.clientHeight") < 2
-    await reader.get_by_role("button", name="Back to terminal", exact=True).click()
-    assert await reader.is_hidden()
-    await page.wait_for_function("document.querySelector('#output-history').textContent === ''")
-    assert await page.locator("#output-history").text_content() == ""
-    assert not await page.evaluate("document.activeElement === testTerm.textarea")
-    # Fullscreen applications retain only their current screen, not scrollback.
-    await write(page, "\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[Hfullscreen current", reset=False)
-    await page.evaluate("window.sent = []")
-    cursor = await page.evaluate("[testTerm.buffer.active.cursorX, testTerm.buffer.active.cursorY]")
+    await scroll(True)
+    await page.wait_for_function("tmux.position > 0")
+    older = await page.evaluate("tmux.position")
+    await scroll(False)
+    await page.wait_for_function("older => tmux.position < older", arg=older)
+    # At the oldest row, further scrolling keeps the same mode at the top.
+    await page.evaluate("tmux.position = tmux.history - 1")
+    await scroll(True)
+    await page.wait_for_function("tmux.position === tmux.history")
+    await page.wait_for_function("document.querySelector('#browse-status').textContent === 'Top of history'")
+    await scroll(True)
+    await page.wait_for_timeout(150)
+    assert await page.evaluate("tmux.active && tmux.position === tmux.history")
+    assert await page.locator("dialog[open]").count() == 0
+    # Keys and swipes never reach the shell while browsing.
+    await page.keyboard.type("x")
+    assert await page.evaluate("sent.every(x => x.startsWith('{'))"), await page.evaluate("sent")
+    await page.get_by_role("button", name="Back to terminal", exact=True).click()
+    await page.wait_for_function("document.querySelector('#browse-output').textContent === 'Browse output'")
+    assert not await page.evaluate("tmux.active")
+    assert await page.locator("#browse-status").is_hidden()
+    # A plain shell has no tmux client to browse.
+    await page.evaluate("tmux.available = false")
     await page.get_by_role("button", name="Browse output", exact=True).click()
-    assert "saved output 0" in await page.locator("#output-history").text_content()
-    assert "fullscreen current" in await page.locator("#output-screen").text_content()
-    assert "Choose" in await page.locator("#output-help").text_content()
-    browser_name = page.context.browser.browser_type.name
-    await page.screenshot(path=str(OUT / f"{browser_name}-output-{page.viewport_size['width']}.png"))
-    await scroll.evaluate("e => { e.scrollTop = 0; }")
-    await scroll_by(150)
-    await page.wait_for_function("document.querySelector('#output-scroll').scrollTop > 0")
-    await reader.get_by_role("button", name="Back to terminal", exact=True).click()
-    assert await page.evaluate("[testTerm.buffer.active.cursorX, testTerm.buffer.active.cursorY]") == cursor
-    assert await page.evaluate("sent.filter(x => typeof x !== 'string' || !x.startsWith('{')).length") == 0
-    await page.wait_for_function("document.querySelector('#output-screen').textContent === ''")
-    assert await page.locator("#output-screen").text_content() == ""
-
-
-async def history_paging(page):
-    await write(page, "\r\n".join(f"older output {i}" for i in range(1200)))
-    await page.evaluate("window.sent = []")
-    await page.get_by_role("button", name="Browse output", exact=True).click()
-    reader = page.locator("#output-dialog")
-    scroll = page.locator("#output-scroll")
-    previous = reader.get_by_role("button", name="Previous page", exact=True)
-    following = reader.get_by_role("button", name="Next page", exact=True)
-    bottom = await scroll.evaluate("e => e.scrollTop")
-    height = await scroll.evaluate("e => e.clientHeight")
-    for _ in range(4):
-        await previous.click()
-    earlier = await scroll.evaluate("e => e.scrollTop")
-    assert bottom - earlier > height * 3
-    await following.click()
-    assert await scroll.evaluate("e => e.scrollTop") > earlier
-    await reader.get_by_role("button", name="Latest", exact=True).click()
-    assert await scroll.evaluate("e => e.scrollTop") == bottom
-    assert await page.evaluate("sent.filter(x => typeof x !== 'string' || !x.startsWith('{')).length") == 0
-
-    source = reader.get_by_role("combobox", name="Output source")
-    for app, enter, leave, latest in (
-        ("codex", "\x14", "\x14", "\x1b[F"),
-        ("claude", "\x0f", "\x0f", "\x1b[1;5F"),
-        ("tmux", "\x02[", "q", "q\x02["),
-    ):
-        await page.evaluate("window.sent = []")
-        await source.select_option(app)
-        assert await page.evaluate("sent.join('')") == enter
-        # The application owns older messages. Deliver its redraw over the
-        # real websocket input path; they never existed in normal scrollback.
-        await page.evaluate("socket.onmessage({data: '\\x1b[?1049h\\x1b[2J\\x1b[Happ latest'})")
-        await page.wait_for_function("document.querySelector('#output-history').textContent.includes('app latest')")
-        for i in range(3):
-            sent_count = await page.evaluate("sent.length")
-            await previous.click()
-            assert await page.evaluate("sent.length") == sent_count + 1
-            assert await page.evaluate("sent[sent.length - 1]") == "\x1b[5~"
-            await page.evaluate("""i => socket.onmessage({data: new TextEncoder().encode(
-                '\\x1b[2J\\x1b[Happ older page ' + i + ' 中文').buffer})""", i)
-            await page.wait_for_function("i => document.querySelector('#output-history').textContent.includes('app older page ' + i)", arg=i)
-        # Read the rest of a large returned page before requesting another.
-        rows = await page.evaluate("testTerm.rows")
-        await write(page, "\x1b[2J\x1b[H" + "\r\n".join(f"app long page {i}" for i in range(rows)), reset=False)
-        await page.wait_for_function("document.querySelector('#output-history').textContent.includes('app long page 0')")
-        await scroll.evaluate("e => { e.scrollTop = e.scrollHeight; }")
-        page_bottom = await scroll.evaluate("e => e.scrollTop")
-        assert page_bottom > 0
-        await page.evaluate("window.sent = []")
-        await previous.click()
-        assert await scroll.evaluate("e => e.scrollTop") < page_bottom
-        assert await page.evaluate("sent.length") == 0
-        await scroll.evaluate("e => { e.scrollTop = 0; }")
-        await previous.click()
-        assert await page.evaluate("sent.join('')") == "\x1b[5~"
-        await write(page, "\x1b[2J\x1b[Happ earlier screen", reset=False)
-        await page.wait_for_function("document.querySelector('#output-history').textContent.includes('app earlier screen')")
-        await following.click()
-        assert await page.evaluate("sent[sent.length - 1]") == "\x1b[6~"
-        await reader.get_by_role("button", name="Latest", exact=True).click()
-        assert await page.evaluate("sent[sent.length - 1]") == latest
-        # Live app redraws must not destroy native text selection during copy.
-        await page.evaluate("""() => {
-          const range = document.createRange();
-          range.selectNodeContents(document.querySelector('#output-history'));
-          getSelection().removeAllRanges(); getSelection().addRange(range);
-        }""")
-        selected = await page.evaluate("getSelection().toString()")
-        await write(page, "\x1b[2J\x1b[Hnew app output", reset=False)
-        assert await page.evaluate("getSelection().toString()") == selected
-        await page.evaluate("getSelection().removeAllRanges()")
-        await reader.get_by_role("button", name="Refresh", exact=True).click()
-        assert "new app output" in await page.locator("#output-history").text_content()
-        await source.select_option("terminal")
-        assert await page.evaluate("sent[sent.length - 1]") == leave
-        await page.evaluate("socket.onmessage({data: '\\x1b[?1049l'})")
-        await page.wait_for_function("testTerm.buffer.active.type === 'normal'")
-        await page.wait_for_function("document.querySelector('#output-history').textContent.includes('older output 0')")
-
-    # A tmux client can use the normal buffer too. Its screen, not old local
-    # scrollback, is the page; reaching its top must still request tmux history.
-    await source.select_option("tmux")
-    assert "older output 0\n" not in await page.locator("#output-history").text_content()
-    await scroll.evaluate("e => { e.scrollTop = 0; }")
-    await page.evaluate("window.sent = []")
-    await previous.click()
-    assert await page.evaluate("sent.join('')") == "\x1b[5~"
-    await reader.get_by_role("button", name="Latest", exact=True).click()
-    assert await page.evaluate("sent[sent.length - 1]") == "q\x02["
-    await source.select_option("terminal")
-    assert await page.evaluate("sent[sent.length - 1]") == "q"
-
-    # Closing exits only an explicitly selected app transcript, exactly once.
-    await source.select_option("codex")
-    await page.evaluate("window.sent = []")
-    await reader.get_by_role("button", name="Back to terminal", exact=True).click()
-    await page.wait_for_function("sent.length === 1")
-    assert await page.evaluate("sent.join('')") == "\x14"
-    assert await page.locator("#output-source").input_value() == "terminal"
-    await page.get_by_role("button", name="Browse output", exact=True).click()
-    await source.select_option("tmux")
-    await page.evaluate("window.sent = []")
-    await page.keyboard.press("Escape")
-    await page.wait_for_function("sent.length === 1")
-    assert await page.evaluate("sent.join('')") == "q"
-    await page.get_by_role("button", name="Browse output", exact=True).click()
-    await source.select_option("tmux")
-    await page.evaluate("window.sent = []; socket.readyState = 3")
-    await previous.click()
-    assert "Disconnected" in await page.locator("#output-help").text_content()
-    await reader.get_by_role("button", name="Back to terminal", exact=True).click()
-    await page.wait_for_function("document.querySelector('#output-source').value === 'terminal'")
-    assert await page.evaluate("sent.length") == 0
-    await page.get_by_role("button", name="Browse output", exact=True).click()
-    await source.select_option("codex")
-    assert await source.input_value() == "terminal"
-    assert await page.evaluate("sent.length") == 0
-    await page.keyboard.press("Escape")
-    await page.wait_for_function("!document.querySelector('#output-dialog').open")
-    await page.evaluate("socket.readyState = 1")
+    await page.wait_for_function("document.querySelector('#notice').textContent.includes('Start tmux')")
+    assert await page.locator("#browse-output").text_content() == "Browse output"
+    await page.evaluate("tmux.available = true")
 
 
 async def mobile(browser, name, sources, chromium=False):
@@ -338,8 +195,7 @@ async def mobile(browser, name, sources, chromium=False):
     assert await page.evaluate("socket.binaryType") == "arraybuffer"
     assert not await page.evaluate("document.activeElement === testTerm.textarea"), "Mobile must not autofocus"
     touch = Touch(page, await context.new_cdp_session(page) if chromium else None)
-    await history_paging(page)
-    await browse_output(page, touch)
+    await browse_mode(page, touch)
     menu = page.locator("#selection-menu")
 
     # Select a word, then extend the end handle across a CJK/emoji line.
@@ -512,13 +368,16 @@ async def mobile(browser, name, sources, chromium=False):
         await page.wait_for_function("Math.abs(document.querySelector('#app').getBoundingClientRect().height - visualViewport.height) < 2")
         await write(page, "alpha beta gamma")
         await page.get_by_role("button", name="Browse output", exact=True).click()
-        reader = page.locator("#output-dialog")
-        reader_box = await reader.bounding_box()
-        assert reader_box["x"] >= 0 and reader_box["x"] + reader_box["width"] <= width + 1
-        assert reader_box["y"] >= 0 and reader_box["y"] + reader_box["height"] <= height + 1
-        assert await page.locator("#output-scroll").evaluate("e => e.clientHeight") >= height * .6
-        await page.screenshot(path=str(OUT / f"{name}-reader-{width}x{height}.png"))
-        await reader.get_by_role("button", name="Back to terminal", exact=True).click()
+        await page.wait_for_function("document.querySelector('#browse-output').textContent === 'Back to terminal'")
+        # Browsing keeps the terminal in place; only the toolbar changes.
+        for selector in ("#browse-output", "#browse-status"):
+            box = await page.locator(selector).bounding_box()
+            assert box["x"] >= 0 and box["x"] + box["width"] <= width + 1, (selector, width, box)
+        term_box = await page.locator("#term").bounding_box()
+        assert term_box["height"] >= height * .6 and await page.locator("dialog[open]").count() == 0
+        await page.screenshot(path=str(OUT / f"{name}-browse-{width}x{height}.png"))
+        await page.get_by_role("button", name="Back to terminal", exact=True).click()
+        await page.wait_for_function("document.querySelector('#browse-output').textContent === 'Browse output'")
         await touch.hold(*await point(page, 8, 0))
         box = await menu.bounding_box()
         assert box["x"] >= 0 and box["x"] + box["width"] <= width + 1, (width, box)
@@ -527,7 +386,7 @@ async def mobile(browser, name, sources, chromium=False):
         await menu.get_by_role("button", name="Dismiss selection", exact=True).click()
     assert not errors, errors
     await context.close()
-    print(f"PASS {name}: output reader, selection/CJK/wrap, copy/paste/fallback, cancel/disconnect, scroll/mouse/alt, binary/proxy, viewport", flush=True)
+    print(f"PASS {name}: tmux browse mode, selection/CJK/wrap, copy/paste/fallback, cancel/disconnect, scroll/mouse/alt, binary/proxy, viewport", flush=True)
 
 
 async def desktop(browser, sources):
@@ -565,21 +424,16 @@ async def desktop(browser, sources):
     await page.keyboard.type("pwd")
     await page.keyboard.press("Enter")
     assert await page.evaluate("sent.filter(x => !x.startsWith('{')).join('')") == "pwd\r"
-    await history_paging(page)
-    await browse_output(page)
-    await write(page, "selectable output line")
-    await page.get_by_role("button", name="Browse output", exact=True).click()
-    text_box = await page.locator("#output-history").bounding_box()
-    await page.mouse.move(text_box["x"], text_box["y"] + 10)
-    await page.mouse.down()
-    await page.mouse.move(text_box["x"] + 200, text_box["y"] + 10, steps=5)
-    await page.mouse.up()
-    assert await page.evaluate("getSelection().toString()") == "selectable output line"
-    await page.keyboard.press("Escape")
-    assert await page.locator("#output-dialog").is_hidden()
-    await page.wait_for_function("document.querySelector('#output-history').textContent === ''")
+    await browse_mode(page)
+    await context.add_init_script('window.disableTmux = true')
+    await page.reload()
+    await page.wait_for_function('window.testTerm && window.sent.length > 0')
+    await page.evaluate('window.sent = []')
+    await page.get_by_role('button', name='Browse output', exact=True).click()
+    await page.wait_for_function("document.querySelector('#notice').textContent.includes('Start tmux')")
+    assert await page.evaluate('sent.every(x => JSON.parse(x).type === "resize")')
     await context.close()
-    print("PASS desktop: native output scrolling/selection, mouse selection, typing/Enter, root websocket, optional addon failure", flush=True)
+    print("PASS desktop: tmux browse mode via wheel, mouse selection, typing/Enter, root websocket, optional addon failure", flush=True)
 
 
 async def main():
