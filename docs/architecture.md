@@ -69,9 +69,14 @@ able to reach that CDN.
 - Inside tmux, tap **Browse output** to put the attached pane into tmux's own
   copy mode, in place; the same toolbar button then reads **Back to terminal**.
   Swipe down for older rows and up for newer ones; desktop wheel, arrow and
-  Page keys do the same. This includes output above a full-screen program such
-  as Codex or Claude Code, because tmux keeps the shell's earlier rows as pane
-  history. At tmux's oldest retained row, browsing simply stays at the top
+  Page keys do the same. This includes output above a full-screen program,
+  because tmux keeps the shell's earlier rows as pane history. A program on
+  the alternate screen redraws in place, so tmux retains none of its own
+  output. Codex does this by default inside tmux; provisioning therefore sets
+  `[tui] alternate_screen = "never"` in the guest's `~/.codex/config.toml`
+  (on every install and Resume, unless the user already chose a value), and
+  Codex output then accumulates in tmux history like ordinary shell output.
+  At tmux's oldest retained row, browsing simply stays at the top
   (`history-limit` sets how far back that is). **Back to terminal**, Escape or
   `q` cancel copy mode; the program's screen, the shell draft and its caret are
   unchanged. Copy mode entered with the user's own tmux prefix also switches
