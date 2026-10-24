@@ -14,13 +14,14 @@ from urllib.parse import urlencode, urlsplit
 import aiohttp
 from aiohttp import web
 
-from hangar.boxlite import cloud_tunnel_url
+from hangar.boxlite import close_cloud_tunnel, cloud_tunnel_url
 from supabase.admin import AdminStore, response as admin_response
 from supabase.auth import Auth, AuthenticationError, AuthProviderError
 from supabase.config import ROOT, required
 from supabase.crypto import Crypto
 from supabase.database import create_pool
-from supabase.store import Conflict, NotFound, Store, public_box, public_job, validate_agy_trial, validate_resources
+from supabase.store import (Conflict, NotFound, Store, public_box, public_job, public_port, validate_agy_trial,
+                            validate_port, validate_resources)
 from supabase.worker import Worker
 
 
@@ -220,6 +221,41 @@ class Gateway:
             pass
         return response
 
+    async def ports(self, request):
+        session = await self.auth.session(request)
+        rows = await self.store.ports(session["user_id"], identifier(request.match_info["box"]))
+        return web.json_response({"ports": [public_port(row) for row in rows]})
+
+    async def expose_port(self, request):
+        session = await self.mutation(request)
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError()
+        port = validate_port(data.get("port"))
+        row = await self.store.box(session["user_id"], identifier(request.match_info["box"]))
+        if row["status"] != "running" or not row["provider_id"]:
+            raise Conflict("Start this Box before exposing a port")
+        # Anyone with this URI reaches the guest port: no sign-in, by the owner's choice.
+        url = await asyncio.to_thread(cloud_tunnel_url, row["provider_id"], port)
+        if urlsplit(url).scheme != "https":
+            raise RuntimeError("Invalid tunnel URI")
+        try:
+            saved = await self.store.add_port(session["user_id"], row["id"], port, url)
+        except (Conflict, NotFound):
+            # Refused ports are always new, so their tunnel must not stay open unlisted.
+            await asyncio.to_thread(close_cloud_tunnel, row["provider_id"], port)
+            raise
+        return web.json_response({"port": public_port(saved)}, status=201)
+
+    async def close_port(self, request):
+        session = await self.mutation(request)
+        port = validate_port(int(request.match_info["port"]))
+        row = await self.store.box(session["user_id"], identifier(request.match_info["box"]))
+        if row["provider_id"]:
+            await asyncio.to_thread(close_cloud_tunnel, row["provider_id"], port)
+        await self.store.remove_port(session["user_id"], row["id"], port)
+        return web.json_response({"closed": port})
+
     async def owned_running(self, request):
         session = await self.auth.session(request)
         row = await self.store.box(session["user_id"], identifier(request.match_info["box"]))
@@ -327,6 +363,8 @@ def application(gateway):
         web.post("/auth/logout", gateway.logout), web.get("/api/boxes", gateway.boxes),
         web.post("/api/boxes", gateway.create), web.delete("/api/boxes/{box}", gateway.operate),
         web.post("/api/boxes/{box}/{operation:stop|resume}", gateway.operate),
+        web.get("/api/boxes/{box}/ports", gateway.ports), web.post("/api/boxes/{box}/ports", gateway.expose_port),
+        web.delete("/api/boxes/{box}/ports/{port:[0-9]+}", gateway.close_port),
         web.get("/api/jobs", gateway.jobs), web.get("/api/jobs/{job}/log", gateway.events),
         web.get("/terminal/{box}/", gateway.terminal), web.get("/terminal/{box}/ws", gateway.websocket),
     ])

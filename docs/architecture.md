@@ -6,9 +6,13 @@ The project provides a custom Go Web Terminal for environments that need a
 controllable browser UI. The service runs an independent PTY shell inside the
 Box and serves the browser application over HTTP and WebSocket on port `3001`.
 
-Only port `3001` is part of the public service contract. Port `22222` is
-reserved for internal platform use and must not be exposed through public
-ingress, preview URLs, Docker publishing, or marketplace manifests.
+Port `3001` is the service contract. It is reached only through an
+authenticated proxy. In Supabase mode, a Box owner may also expose other guest
+ports publicly from the Box details view: the gateway opens a BoxLite tunnel
+for the port (`POST /api/v1/boxes/{id}/network/tunnel?port=N`), stores the URL
+in `box_ports`, and closes it with `DELETE` on the same path. Tunnel URLs are
+stable per port and survive Stop/Resume. Port `3001` is refused, and each Box
+can expose at most 10 ports.
 
 ## Runtime Contents
 

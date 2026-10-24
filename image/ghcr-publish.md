@@ -82,8 +82,7 @@ docker run --rm --entrypoint /bin/bash "$LOCAL_IMAGE" -ec \
   'id; command -v codex; command -v claude; command -v agent; tmux -V'
 ```
 
-Do not publish port `22222`. The image contract and external service manifest
-contain only port `3001`.
+The image contract and external service manifest declare port `3001`.
 
 ## 3. Prepare GHCR Permission
 

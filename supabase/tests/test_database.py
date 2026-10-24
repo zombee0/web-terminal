@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from aiohttp.test_utils import TestClient, TestServer
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from supabase.app import Gateway, application
 from supabase.admin import AdminStore
@@ -42,6 +42,7 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         await self.pool.execute((ROOT/'supabase/migrations/004_application_roles.sql').read_text().replace('web_terminal', self.schema))
         await self.pool.execute((ROOT/'supabase/migrations/005_user_resource_quota.sql').read_text().replace('web_terminal', self.schema))
         await self.pool.execute((ROOT/'supabase/migrations/006_agy_trial.sql').read_text().replace('web_terminal', self.schema))
+        await self.pool.execute((ROOT/'supabase/migrations/007_box_ports.sql').read_text().replace('web_terminal', self.schema))
         self.store = Store(self.pool)
         self.owners = [uuid.uuid4(), uuid.uuid4()]
         self.cookies = [secrets.token_urlsafe(32), secrets.token_urlsafe(32)]
@@ -140,6 +141,51 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(box["agy_trial"])
         listed = await (await self.client.get("/api/boxes", headers=self.headers())).json()
         self.assertEqual([item["gemini"] for item in listed["boxes"]], [True])
+
+    async def test_public_ports_are_owner_scoped_limited_and_never_the_terminal(self):
+        job = await self.store.create(self.owners[0], "Ports", None)
+        box = job["box_id"]
+        ports = f"/api/boxes/{box}/ports"
+        tunnel = lambda provider, port: f"https://{provider}-{port}.tunnel.test/"
+        with patch("supabase.app.cloud_tunnel_url", side_effect=tunnel) as opened, \
+                patch("supabase.app.close_cloud_tunnel") as closed, patch("supabase.store.MAX_PUBLIC_PORTS", 3):
+            response = await self.client.post(ports, json={"port": 8000}, headers=self.headers())
+            self.assertEqual(response.status, 409, "a Box that is still creating has no tunnel")
+            await self.pool.execute("UPDATE boxes SET status='running',provider_id='prov',provisioned=true WHERE id=$1", box)
+            for body in ({"port": 0}, {"port": "80"}, {"port": True}, []):
+                response = await self.client.post(ports, json=body, headers=self.headers())
+                self.assertEqual(response.status, 400, body)
+            response = await self.client.post(ports, json={"port": 3001}, headers=self.headers())
+            self.assertEqual(response.status, 409)
+            self.assertIn("3001", (await response.json())["error"])
+            response = await self.client.post(ports, json={"port": 8000}, headers={**self.headers(), "X-CSRF-Token": "forged"})
+            self.assertIn(response.status, (401, 403))
+            response = await self.client.post(ports, json={"port": 8000}, headers=self.headers())
+            self.assertEqual(response.status, 201)
+            self.assertEqual((await response.json())["port"]["url"], "https://prov-8000.tunnel.test/")
+            response = await self.client.post(ports, json={"port": 8000}, headers=self.headers())
+            self.assertEqual(response.status, 201, "exposing again returns the same port")
+            self.assertEqual((await self.client.get(ports, headers=self.headers(1))).status, 404)
+            self.assertEqual((await self.client.post(ports, json={"port": 9000}, headers=self.headers(1))).status, 404)
+            self.assertEqual((await self.client.delete(ports+"/8000", headers=self.headers(1))).status, 404)
+            for port in (9001, 9002):
+                self.assertEqual((await self.client.post(ports, json={"port": port}, headers=self.headers())).status, 201)
+            response = await self.client.post(ports, json={"port": 9100}, headers=self.headers())
+            self.assertEqual(response.status, 409, "port limit per Box")
+            listed = (await (await self.client.get(ports, headers=self.headers())).json())["ports"]
+            self.assertEqual([item["port"] for item in listed], [8000, 9001, 9002])
+            self.assertEqual((await self.client.delete(ports+"/3001", headers=self.headers())).status, 409)
+            self.assertEqual((await self.client.delete(ports+"/9001", headers=self.headers())).status, 200)
+            self.assertEqual([call.args for call in closed.call_args_list], [("prov", 9100), ("prov", 9001)],
+                             "a refused port's tunnel is closed, not left public")
+            self.assertEqual((await self.client.delete(ports+"/9001", headers=self.headers())).status, 404)
+            # A stopped Box keeps its list; its links work again after Resume.
+            await self.pool.execute("UPDATE boxes SET status='stopped' WHERE id=$1", box)
+            self.assertEqual(len((await (await self.client.get(ports, headers=self.headers())).json())["ports"]), 2)
+            self.assertEqual((await self.client.post(ports, json={"port": 9200}, headers=self.headers())).status, 409)
+        self.assertNotIn(3001, [call.args[1] for call in opened.call_args_list])
+        with self.assertRaises(Exception):
+            await self.pool.execute("INSERT INTO box_ports(box_id,port,url) VALUES($1,3001,'https://direct.test/')", box)
 
     async def test_concurrent_retries_return_the_same_job(self):
         key = str(uuid.uuid4())

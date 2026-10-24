@@ -80,6 +80,18 @@ class ServiceUrlTest(unittest.TestCase):
             with self.assertRaises(wt.CloudAPIError):
                 wt.service_url("cloud", box)
 
+    def test_close_tunnel_deletes_one_port_and_tolerates_closed(self):
+        with mock.patch("hangar.boxlite.cloud_api") as api:
+            wt.close_cloud_tunnel("example", 8000)
+        api.assert_called_once_with("DELETE", "/api/v1/boxes/example/network/tunnel?port=8000")
+        with mock.patch("hangar.boxlite.cloud_api", side_effect=wt.CloudAPIError(404)):
+            wt.close_cloud_tunnel("example", 8000)
+        with mock.patch("hangar.boxlite.cloud_api", side_effect=wt.CloudAPIError(500)):
+            with self.assertRaises(wt.CloudAPIError):
+                wt.close_cloud_tunnel("example", 8000)
+        with self.assertRaises(ValueError):
+            wt.close_cloud_tunnel("example", 0)
+
     def test_embedded_uses_loopback(self):
         with mock.patch.dict(os.environ, {"BOXLITE_HOST_PORT": "4010"}):
             self.assertEqual(wt.service_url("embedded", object()), "http://127.0.0.1:4010")
