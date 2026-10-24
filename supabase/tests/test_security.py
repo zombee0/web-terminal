@@ -36,8 +36,9 @@ class CryptoTest(unittest.TestCase):
     def test_api_redacts_provider_fields(self):
         row = dict(id=uuid.uuid4(), name="Example", status="running", created_at=datetime.now(timezone.utc),
                    failure_code=None, provider_id="PRIVATE-ID", provider_name="PRIVATE-NAME", url="SECRET-URL",
-                   cpus=1, memory_mib=2048, disk_size_gb=10)
+                   cpus=1, memory_mib=2048, disk_size_gb=10, agy_trial=True)
         exposed = json.dumps(public_box(row))
+        self.assertIs(public_box(row)["gemini"], True)
         for value in ("PRIVATE-ID", "PRIVATE-NAME", "SECRET-URL"):
             self.assertNotIn(value, exposed)
         self.assertIsNone(public_box(row)["url"])

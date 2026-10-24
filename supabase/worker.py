@@ -68,7 +68,7 @@ class Worker:
         if row["provisioned"]:
             await resume_web_terminal(self.runtime, box, "cloud", install_clis=False, **options)
         else:
-            await provision_web_terminal(self.runtime, box, "cloud", **options)
+            await provision_web_terminal(self.runtime, box, "cloud", install_agy=row["agy_trial"], **options)
         await self.store.finish(job, self.id, "running", provisioned=True)
 
     async def heartbeat(self, job, work):

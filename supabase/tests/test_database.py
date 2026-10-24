@@ -41,6 +41,7 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         await self.pool.execute(sql)
         await self.pool.execute((ROOT/'supabase/migrations/004_application_roles.sql').read_text().replace('web_terminal', self.schema))
         await self.pool.execute((ROOT/'supabase/migrations/005_user_resource_quota.sql').read_text().replace('web_terminal', self.schema))
+        await self.pool.execute((ROOT/'supabase/migrations/006_agy_trial.sql').read_text().replace('web_terminal', self.schema))
         self.store = Store(self.pool)
         self.owners = [uuid.uuid4(), uuid.uuid4()]
         self.cookies = [secrets.token_urlsafe(32), secrets.token_urlsafe(32)]
@@ -113,13 +114,15 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 401)
 
     async def test_resource_validation_and_expired_lease_recovery(self):
-        for resources in [{'cpus': 999}, {'memory_mib': 1}, {'disk_size_gb': 11}, {'cpus': True}, {'memory_mib': '2048'}]:
+        for resources in [{'cpus': 999}, {'memory_mib': 1}, {'disk_size_gb': 11}, {'cpus': True}, {'memory_mib': '2048'},
+                          {'gemini': 'yes'}, {'gemini': 1}, {'gemini': None}]:
             response = await self.client.post('/api/boxes', json={'name': 'Invalid', **resources}, headers=self.headers())
             self.assertEqual(response.status, 400)
         response = await self.client.post("/api/boxes", json={"name": "Test", "cpus": 2, "memory_mib": 4096}, headers=self.headers())
         self.assertEqual(response.status, 202)
         box = await self.pool.fetchrow("SELECT * FROM boxes")
         self.assertEqual((box["cpus"], box["memory_mib"], box["disk_size_gb"]), (2, 4096, 10))
+        self.assertFalse(box["agy_trial"])
         first, second = uuid.uuid4(), uuid.uuid4()
         job = await self.store.claim(first)
         self.assertIsNone(await self.store.claim(second))
@@ -129,6 +132,14 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Conflict):
             await self.store.finish(job, first, "running")
         await self.store.finish(recovered, second, "running", provisioned=True)
+
+    async def test_gemini_trial_is_stored_per_box(self):
+        response = await self.client.post("/api/boxes", json={"name": "Gemini", "cpus": 1, "memory_mib": 1024, "gemini": True}, headers=self.headers())
+        self.assertEqual(response.status, 202)
+        box = await self.pool.fetchrow("SELECT * FROM boxes WHERE name='Gemini'")
+        self.assertTrue(box["agy_trial"])
+        listed = await (await self.client.get("/api/boxes", headers=self.headers())).json()
+        self.assertEqual([item["gemini"] for item in listed["boxes"]], [True])
 
     async def test_concurrent_retries_return_the_same_job(self):
         key = str(uuid.uuid4())

@@ -31,6 +31,7 @@ async def main():
     hosted = True
     logout_headers = []
     boxes = []
+    created = []
 
     async def serve(route):
         path = urlsplit(route.request.url).path
@@ -45,6 +46,9 @@ async def main():
             await route.fulfill(json=session)
         elif path == '/api/status':
             await route.fulfill(json={'cloud': {'ready': True}})
+        elif path == '/api/boxes' and route.request.method == 'POST':
+            created.append(route.request.post_data_json)
+            await route.fulfill(status=202, json={'job': {'id': 'job-1', 'box_id': 'box-1', 'action': 'create', 'status': 'running'}})
         elif path == '/api/boxes':
             await route.fulfill(json={'boxes': boxes})
         elif path == '/auth/logout':
@@ -71,6 +75,21 @@ async def main():
         assert await page.locator('#btn-create').is_enabled()
         assert await page.locator('#res-cpus').input_value() == '1'
         assert await page.locator('#res-memory').input_value() == '2048'
+        # Gemini is opt-in per Box and reaches the API as a boolean.
+        gemini = page.get_by_role('checkbox', name='TRY GEMINI FREE TIER')
+        assert not await gemini.is_checked()
+        assert 'paste the code' in await page.locator('#hosted-gemini-note').inner_text()
+        await page.locator('#btn-create').click()
+        await gemini.check()
+        await page.locator('#btn-create').click()
+        for _ in range(50):
+            if len(created) == 2:
+                break
+            await page.wait_for_timeout(100)
+        assert [body.get('gemini') for body in created] == [False, True], created
+        assert all(body['runtime'] == 'cloud' and body['cpus'] == 1 for body in created), created
+        await gemini.uncheck()
+        await page.screenshot(path=str(OUT/'create-gemini-option.png'))
         boxes.append({'id': '11111111-2222-4333-8444-555555555555', 'name': 'Small terminal', 'status': 'running',
                       'cpus': 1, 'memory_mib': 2048, 'disk_size_gb': 10, 'url': None, 'access_url': '/terminal/example/'})
         await page.locator('#btn-refresh').click()
