@@ -66,6 +66,31 @@ able to reach that CDN.
 
 ### Phone interaction
 
+- Inside tmux, tap **Browse output** to put the attached pane into tmux's own
+  copy mode, in place; the same toolbar button then reads **Back to terminal**.
+  Swipe down for older rows and up for newer ones; desktop wheel, arrow and
+  Page keys do the same. This includes output above a full-screen program,
+  because tmux keeps the shell's earlier rows as pane history. A program on
+  the alternate screen redraws in place, so tmux retains none of its own
+  output. Codex does this by default inside tmux; provisioning therefore sets
+  `[tui] alternate_screen = "never"` in the guest's `~/.codex/config.toml`
+  (on every install and Resume, unless the user already chose a value), and
+  Codex output then accumulates in tmux history like ordinary shell output.
+  At tmux's oldest retained row, browsing simply stays at the top
+  (`history-limit` sets how far back that is). **Back to terminal**, Escape or
+  `q` cancel copy mode; the program's screen, the shell draft and its caret are
+  unchanged. Copy mode entered with the user's own tmux prefix also switches
+  the toolbar. Outside tmux, swipes scroll xterm's own scrollback.
+- A transparent `tmux` wrapper, first on the shell's PATH, runs the real tmux
+  and pairs that client with this WebSocket over a private Unix socket. The
+  service sends `browse-ready` first; browse requests are text frames and
+  terminal input is binary, so JSON typed by the user stays shell input. The
+  service only issues `copy-mode` and `send-keys -X` commands to the paired
+  client's pane, never keystrokes into the application, and cancels copy mode
+  it started when the browser disconnects. The pairing address is kept out of
+  the tmux server environment. Nothing is recorded to disk. The wrapper lives
+  in `/var/lib/web-terminal/bin` (root-owned) for the protected service, or
+  `~/.local/state/web-terminal/bin` for standalone use.
 - Tap the terminal to focus the software keyboard. Mobile pages do not focus
   the terminal automatically when the WebSocket connects.
 - Hold for 450 ms to select a word and open Copy / Paste / Select all / Done.
@@ -95,11 +120,22 @@ pinned CDN assets into `build/terminal-ui/`; screenshots are written there too.
 WebSocket and clipboard fixtures are isolated from real Boxes and clipboards.
 Real iPhone/Android checks are still needed for system clipboard permissions,
 native selection callouts and the software keyboard itself.
+Browse mode is checked against a mocked tmux pairing with Chromium touch,
+WebKit DOM touch events and desktop wheel input, at several phone viewports.
+
+Run `make test TEST_TARGETS="test-go test-terminal-native"` for real tmux
+acceptance. `test-go` drives the production WebSocket/PTY loop against an
+isolated tmux server: pairing, copy mode over an alternate-screen program,
+the top boundary and cleanup on disconnect. `test-terminal-native` adds
+Chromium and WebKit on a phone viewport: bidirectional swipes, exact colored
+rows, long-press copy, vi and emacs mode keys, a custom prefix, mouse on/off,
+client isolation, a full-screen program over earlier shell output, and a
+preserved shell draft and caret. No existing tmux sessions are read or changed.
 
 For a host-recorded test run, use
 `make test TEST_TARGETS="test-go test-terminal-ui"`. The default `make test`
 suite is unchanged. The [mobile design and acceptance issue](https://github.com/zombee0/web-terminal/issues/2)
-records the approach, alternatives and outstanding phone checks.
+tracks this work.
 
 ## Authentication and Preview Access
 

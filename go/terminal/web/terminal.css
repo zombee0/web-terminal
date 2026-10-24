@@ -6,8 +6,11 @@ button { min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; backg
 button:disabled { opacity: .4; cursor: default; }
 button:active { background: #344c65; }
 button:focus-visible { outline: 2px solid #78b7ff; outline-offset: -2px; }
-#app { position: absolute; top: 0; left: 0; width: 100%; max-width: 100%; height: 100%; height: 100dvh; overflow: hidden; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
-#term { width: 100%; height: 100%; touch-action: pinch-zoom; }
+#app { position: absolute; top: 0; left: 0; width: 100%; max-width: 100%; height: 100%; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+#terminal-actions { display: flex; justify-content: flex-end; flex-shrink: 0; border-bottom: 1px solid #263a4d; background: #131c26; }
+#browse-status { flex: 1; align-self: center; padding-left: 8px; font-size: 11px; color: #aebfd0; }
+#terminal-actions button { white-space: nowrap; padding: 0 8px; }
+#term { flex: 1; min-height: 0; width: 100%; touch-action: pinch-zoom; }
 /* Keep native selection/callouts available in the clipboard fallback field. */
 #term, .selection-handle { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 #term .xterm-viewport { overscroll-behavior: contain; }

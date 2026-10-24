@@ -237,6 +237,54 @@ async def install_agent_clis(box, mode, *, log=None):
     )
 
 
+# Codex defaults to the alternate screen inside tmux. There it redraws in place,
+# so tmux retains none of its output and copy mode has nothing to scroll back
+# to. Inline mode keeps finished output in tmux history. An explicit user
+# choice, or a config this edit cannot safely extend, is left unchanged.
+CODEX_INLINE_SCRIPT = r"""
+import pathlib, re, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text() if path.exists() else ""
+if re.search(r"(?m)^\s*(tui\.)?alternate_screen\s*=", text):
+    sys.exit(0)
+line = 'alternate_screen = "never"  # web-terminal: keep Codex output in tmux history'
+header = re.search(r"(?m)^\[tui\][ \t]*(#.*)?$", text)
+if header:
+    text = text[:header.end()] + "\n" + line + text[header.end():]
+else:
+    text += ("\n" if text and not text.endswith("\n") else "") + ("\n" if text else "") + "[tui]\n" + line + "\n"
+try:
+    import tomllib
+except ImportError:
+    tomllib = None
+if tomllib is not None:
+    try:
+        if tomllib.loads(text)["tui"]["alternate_screen"] != "never":
+            raise ValueError
+    except Exception:
+        print("WARNING: left Codex config unchanged", file=sys.stderr)
+        sys.exit(0)
+path.parent.mkdir(mode=0o700, exist_ok=True)
+staged = path.with_name(path.name + ".web-terminal")
+staged.write_text(text)
+staged.chmod(0o600)
+staged.replace(path)
+"""
+
+
+def codex_inline_command():
+    return (
+        "if command -v python3 >/dev/null; then\n"
+        f"  runuser -u boxlite -- python3 -c {shlex.quote(CODEX_INLINE_SCRIPT)} /home/boxlite/.codex/config.toml"
+        " || echo 'WARNING: could not configure Codex inline mode' >&2\n"
+        "fi\n"
+    )
+
+
+async def configure_codex_inline(box, *, log=None):
+    await run_checked(box, "sh", args=["-c", codex_inline_command()], user="root", timeout_secs=30, log=log)
+
+
 def protected_start_command():
     return r"""
 set -eu
@@ -265,6 +313,7 @@ async def install_web_terminal(box, mode, *, log=None, gateway_config=None):
             + protected_start_command()
         )
         await run_checked(box, "sh", args=["-lc", command], user="root", timeout_secs=60, log=log)
+        await configure_codex_inline(box, log=log)
         return
     await box.copy_in(str(app_path(mode)), "/home/boxlite/.web-terminal-upload")
     await run_checked(
@@ -275,6 +324,7 @@ async def install_web_terminal(box, mode, *, log=None, gateway_config=None):
         timeout_secs=60,
         log=log,
     )
+    await configure_codex_inline(box, log=log)
 
 
 async def provision_web_terminal(runtime, box, mode, *, host_port=None, log=None, gateway_config=None, publish_url=True):

@@ -38,15 +38,33 @@
     sendSize();
     if (!coarsePointer.matches) term.focus();
   };
-  ws.onmessage = event => term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
-  ws.onclose = () => term.write('\r\n[Connection closed]\r\n');
+  ws.onmessage = event => {
+    if (typeof event.data === 'string') {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'browse-ready') {
+          browseReady = true;
+          nativeSupported = !!message.tmux;
+          return;
+        }
+        if (message.type === 'tmux-browse') { receiveBrowse(message); return; }
+      } catch { /* Older servers may send terminal text frames. */ }
+    }
+    term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
+  };
+  ws.onclose = () => {
+    setBrowsing(false);
+    term.write('\r\n[Connection closed]\r\n');
+  };
   ws.onerror = () => term.write('\r\n[Connection error]\r\n');
   term.onData(data => {
+    if (reading()) return;
     dismiss();
-    if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data).buffer);
   });
   // Legacy mouse protocols emit raw bytes, not UTF-8 text.
   term.onBinary(data => {
+    if (reading()) return;
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(Uint8Array.from(data, char => char.charCodeAt(0)));
     }
@@ -62,6 +80,119 @@
   let lastTouch = 0;
   let clipboardBusy = false;
   const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
+  const browseButton = document.querySelector('#browse-output');
+  const browseStatus = document.querySelector('#browse-status');
+  let browseReady = false; // Older guest services never announce browsing.
+  let nativeSupported = false;
+  let browsing = false;
+  let browseOpening = false;
+  let browseID = 0;
+  const browseRequests = new Map();
+  let scrollQueued = 0;
+  let scrollSending = false;
+  let scrollTimer = 0;
+
+  function setBrowsing(active, state = {}) {
+    if (browsing !== active) {
+      cancelGesture();
+      dismiss();
+      scrollQueued = 0;
+    }
+    browsing = active;
+    browseButton.textContent = active ? 'Back to terminal' : 'Browse output';
+    browseButton.setAttribute('aria-pressed', String(active));
+    browseStatus.hidden = !active;
+    browseStatus.textContent = active && state.position >= state.history
+      ? 'Top of history' : 'Swipe to read history';
+    menu.querySelector('[data-action="paste"]').disabled = active;
+  }
+
+  function reading() { return browsing || browseOpening; }
+
+  function requestBrowse(action, lines = 0) {
+    if (ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Terminal is disconnected.'));
+    return new Promise((resolve, reject) => {
+      const id = ++browseID;
+      const timer = setTimeout(() => {
+        browseRequests.delete(id);
+        reject(new Error('Browsing timed out. Try again.'));
+      }, 6000);
+      browseRequests.set(id, { resolve, reject, timer });
+      ws.send(JSON.stringify({ type: 'tmux-browse', id, action, lines }));
+    });
+  }
+
+  function receiveBrowse(state) {
+    const request = browseRequests.get(state.id);
+    if (!request) return;
+    clearTimeout(request.timer);
+    browseRequests.delete(state.id);
+    if (state.error) { request.reject(new Error(state.error)); return; }
+    setBrowsing(state.active, state);
+    request.resolve(state);
+  }
+
+  async function enterBrowse() {
+    cancelGesture();
+    dismiss();
+    term.blur();
+    if (!browseReady) { tell('Update this Box to browse output: Stop, then Resume it.'); return; }
+    if (!nativeSupported) { tell('Start tmux to browse output.'); return; }
+    browseOpening = true;
+    browseButton.disabled = true;
+    try {
+      const state = await requestBrowse('enter');
+      if (!state.available) tell('Start tmux to browse output.');
+    } catch (error) { tell(error.message); }
+    finally { browseOpening = false; browseButton.disabled = false; }
+  }
+
+  async function leaveBrowse() {
+    scrollQueued = 0;
+    clearTimeout(scrollTimer);
+    scrollTimer = 0;
+    cancelGesture();
+    dismiss();
+    await requestBrowse('leave');
+    // A tap on the terminal, rather than leaving history, opens the keyboard.
+    term.blur();
+  }
+
+  function queueBrowseScroll(lines) {
+    if (!browsing) return;
+    scrollQueued = clamp(scrollQueued + lines, -1000, 1000);
+    if (scrollSending || scrollTimer) return;
+    scrollTimer = setTimeout(async () => {
+      scrollTimer = 0;
+      if (!browsing || !scrollQueued) return;
+      const count = scrollQueued;
+      scrollQueued = 0;
+      scrollSending = true;
+      try { await requestBrowse('scroll', count); }
+      catch (error) { scrollQueued = 0; tell(error.message); }
+      finally {
+        scrollSending = false;
+        if (scrollQueued) queueBrowseScroll(0);
+      }
+    }, 30);
+  }
+
+  // Also reflect copy mode entered through the user's own tmux prefix.
+  const browsePoll = setInterval(() => {
+    if (ws.readyState === WebSocket.CLOSED) { clearInterval(browsePoll); return; }
+    if (!nativeSupported || browseRequests.size || selecting ||
+        document.hidden || term.buffer.active.type !== 'alternate') return;
+    requestBrowse('state').catch(() => {});
+  }, 1200);
+
+  host.addEventListener('wheel', event => {
+    if (!browsing || event.ctrlKey) return;
+    stopEvent(event);
+    dismiss();
+    const { height } = geometry();
+    const pixels = event.deltaY * (event.deltaMode === 1 ? height : event.deltaMode === 2 ? height * term.rows : 1);
+    queueBrowseScroll(Math.sign(pixels) * Math.max(1, Math.round(Math.abs(pixels) / height)));
+  }, { passive: false, capture: true });
 
   function sendSize() {
     if (ws.readyState === WebSocket.OPEN) {
@@ -291,6 +422,7 @@
     const lines = Math.trunc(gesture.remainder);
     gesture.remainder -= lines;
     if (!lines) return;
+    if (browsing) { queueBrowseScroll(lines); return; }
     if (term.buffer.active.type === 'normal' && term.modes.mouseTrackingMode === 'none') {
       term.scrollLines(lines);
     } else {
@@ -332,7 +464,7 @@
     cancelGesture();
     if (g.mode === 'pending') {
       dismiss();
-      if (!g.hadSelection) term.focus();
+      if (!g.hadSelection && !browsing && !browseOpening) term.focus();
     }
     renderSelection();
   }, { passive: false, capture: true });
@@ -347,8 +479,24 @@
     if (event.key === 'Escape' && selecting && !dialog.open) {
       stopEvent(event);
       dismiss();
+      return;
+    }
+    if (browsing && !dialog.open) {
+      if (event.key === 'Tab' || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.target.closest('button') && (event.key === 'Enter' || event.key === ' ')) return;
+      stopEvent(event);
+      if (event.key === 'Escape' || event.key === 'q') leaveBrowse().catch(error => tell(error.message));
+      if (event.key === 'ArrowUp') queueBrowseScroll(-1);
+      if (event.key === 'ArrowDown') queueBrowseScroll(1);
+      if (event.key === 'PageUp') queueBrowseScroll(-Math.max(1, term.rows - 2));
+      if (event.key === 'PageDown') queueBrowseScroll(Math.max(1, term.rows - 2));
     }
   }, { capture: true });
+
+  browseButton.addEventListener('click', () => {
+    if (browsing) leaveBrowse().catch(error => tell(error.message));
+    else enterBrowse();
+  });
 
   function openClipboard(mode, text = '') {
     dismiss();
@@ -374,6 +522,7 @@
   }
 
   function paste(text) {
+    if (reading()) { tell('Return to terminal before pasting.'); return false; }
     if (!connected()) return false;
     if (!text) { tell('Nothing to paste.'); return false; }
     dismiss();

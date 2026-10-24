@@ -17,6 +17,7 @@ OUT = ROOT / "build" / "terminal-ui"
 HTML = (OUT / "terminal.html").read_text()
 FIXTURE = """() => {
   window.sent = [];
+  window.tmux = {available: true, active: false, position: 0, history: 300};
   window.clipboardText = '';
   window.clipboardDenied = false;
   Object.defineProperty(navigator, 'clipboard', {value: {
@@ -35,9 +36,26 @@ FIXTURE = """() => {
       this.url = url;
       this.readyState = 1;
       window.socket = this;
-      setTimeout(() => this.onopen?.(), 0);
+      setTimeout(() => {
+        this.onopen?.();
+        if (!window.legacyGuest) this.onmessage?.({data: JSON.stringify({type: 'browse-ready', tmux: !window.disableTmux})});
+      }, 0);
     }
-    send(data) { window.sent.push(data); }
+    send(data) {
+      if (data instanceof ArrayBuffer) { window.sent.push(new TextDecoder().decode(data)); return; }
+      window.sent.push(data);
+      if (typeof data !== 'string') return;
+      const request = JSON.parse(data);
+      if (request.type !== 'tmux-browse') return;
+      // A tmux client paired with this browser, as the guest wrapper reports it.
+      const t = window.tmux;
+      if (request.action === 'enter' && t.available) t.active = true;
+      if (request.action === 'leave') { t.active = false; t.position = 0; }
+      if (request.action === 'scroll' && t.active) t.position = Math.max(0, Math.min(t.history, t.position - request.lines));
+      const reply = {type: 'tmux-browse', id: request.id, available: t.available,
+        active: t.available && t.active, position: t.position, history: t.history};
+      setTimeout(() => this.onmessage({data: JSON.stringify(reply)}), 5);
+    }
   };
 }"""
 
@@ -108,6 +126,52 @@ async def point(page, col, row):
     }""", {"col": col, "row": row})
 
 
+async def browse_mode(page, touch=None):
+    """Browse output drives tmux copy mode in place: no separate reader."""
+    await page.evaluate("window.tmux = {available: true, active: false, position: 0, history: 300}; window.sent = []")
+    await page.get_by_role("button", name="Browse output", exact=True).click()
+    await page.wait_for_function("document.querySelector('#browse-output').textContent === 'Back to terminal'")
+    assert await page.locator("dialog[open]").count() == 0
+    assert await page.locator("#browse-status").text_content() == "Swipe to read history"
+
+    async def scroll(older):
+        x, y = await point(page, 10, 6)
+        if touch:
+            # A finger moving down reveals older rows, as in a native list.
+            await touch.swipe(x, y, y + 200) if older else await touch.swipe(x, y + 200, y)
+        else:
+            await page.mouse.move(x, y)
+            await page.mouse.wheel(0, -400 if older else 400)
+
+    await scroll(True)
+    await page.wait_for_function("tmux.position > 0")
+    older = await page.evaluate("tmux.position")
+    await scroll(False)
+    await page.wait_for_function("older => tmux.position < older", arg=older)
+    # At the oldest row, further scrolling keeps the same mode at the top.
+    await page.evaluate("tmux.position = tmux.history - 1")
+    await scroll(True)
+    await page.wait_for_function("tmux.position === tmux.history")
+    await page.wait_for_function("document.querySelector('#browse-status').textContent === 'Top of history'")
+    await scroll(True)
+    await page.wait_for_timeout(150)
+    assert await page.evaluate("tmux.active && tmux.position === tmux.history")
+    assert await page.locator("dialog[open]").count() == 0
+    # Keys and swipes never reach the shell while browsing.
+    await page.keyboard.type("x")
+    assert await page.evaluate("sent.every(x => x.startsWith('{'))"), await page.evaluate("sent")
+    await page.get_by_role("button", name="Back to terminal", exact=True).click()
+    await page.wait_for_function("document.querySelector('#browse-output').textContent === 'Browse output'")
+    assert not await page.evaluate("tmux.active")
+    assert await page.locator("#browse-status").is_hidden()
+    # A plain shell has no tmux client to browse.
+    await page.evaluate("tmux.available = false")
+    await page.get_by_role("button", name="Browse output", exact=True).click()
+    await page.wait_for_function("document.querySelector('#notice').textContent.includes('Start tmux')")
+    assert await page.locator("#browse-output").text_content() == "Browse output"
+    await page.evaluate("tmux.available = true")
+
+
 async def mobile(browser, name, sources, chromium=False):
     context = await browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, device_scale_factor=2)
     await context.add_init_script(f"({FIXTURE})()")
@@ -131,6 +195,7 @@ async def mobile(browser, name, sources, chromium=False):
     assert await page.evaluate("socket.binaryType") == "arraybuffer"
     assert not await page.evaluate("document.activeElement === testTerm.textarea"), "Mobile must not autofocus"
     touch = Touch(page, await context.new_cdp_session(page) if chromium else None)
+    await browse_mode(page, touch)
     menu = page.locator("#selection-menu")
 
     # Select a word, then extend the end handle across a CJK/emoji line.
@@ -286,7 +351,7 @@ async def mobile(browser, name, sources, chromium=False):
     await write(page, "\x1b[?1006l", reset=False)
     await page.evaluate("window.sent = []")
     await touch.swipe(150, 400, 250)
-    reports = await page.evaluate("sent.map(data => Array.from(data))")
+    reports = await page.evaluate("sent.filter(data => typeof data !== 'string' || !data.startsWith('{')).map(data => Array.from(data))")
     assert reports and all(report[:4] == [27, 91, 77, 97] and len(report) == 6 for report in reports), reports
     # Alternate screen without mouse mode still uses xterm's cursor-key behavior.
     await write(page, "\x1b[?1000l\x1b[?1006l", reset=False)
@@ -302,6 +367,17 @@ async def mobile(browser, name, sources, chromium=False):
         await page.set_viewport_size({"width": width, "height": height})
         await page.wait_for_function("Math.abs(document.querySelector('#app').getBoundingClientRect().height - visualViewport.height) < 2")
         await write(page, "alpha beta gamma")
+        await page.get_by_role("button", name="Browse output", exact=True).click()
+        await page.wait_for_function("document.querySelector('#browse-output').textContent === 'Back to terminal'")
+        # Browsing keeps the terminal in place; only the toolbar changes.
+        for selector in ("#browse-output", "#browse-status"):
+            box = await page.locator(selector).bounding_box()
+            assert box["x"] >= 0 and box["x"] + box["width"] <= width + 1, (selector, width, box)
+        term_box = await page.locator("#term").bounding_box()
+        assert term_box["height"] >= height * .6 and await page.locator("dialog[open]").count() == 0
+        await page.screenshot(path=str(OUT / f"{name}-browse-{width}x{height}.png"))
+        await page.get_by_role("button", name="Back to terminal", exact=True).click()
+        await page.wait_for_function("document.querySelector('#browse-output').textContent === 'Browse output'")
         await touch.hold(*await point(page, 8, 0))
         box = await menu.bounding_box()
         assert box["x"] >= 0 and box["x"] + box["width"] <= width + 1, (width, box)
@@ -310,7 +386,7 @@ async def mobile(browser, name, sources, chromium=False):
         await menu.get_by_role("button", name="Dismiss selection", exact=True).click()
     assert not errors, errors
     await context.close()
-    print(f"PASS {name}: selection/CJK/wrap, copy/paste/fallback, cancel/disconnect, scroll/mouse/alt, binary/proxy, viewport", flush=True)
+    print(f"PASS {name}: tmux browse mode, selection/CJK/wrap, copy/paste/fallback, cancel/disconnect, scroll/mouse/alt, binary/proxy, viewport", flush=True)
 
 
 async def desktop(browser, sources):
@@ -348,8 +424,24 @@ async def desktop(browser, sources):
     await page.keyboard.type("pwd")
     await page.keyboard.press("Enter")
     assert await page.evaluate("sent.filter(x => !x.startsWith('{')).join('')") == "pwd\r"
+    await browse_mode(page)
+    await context.add_init_script('window.disableTmux = true')
+    await page.reload()
+    await page.wait_for_function('window.testTerm && window.sent.length > 0')
+    await page.evaluate('window.sent = []')
+    await page.get_by_role('button', name='Browse output', exact=True).click()
+    await page.wait_for_function("document.querySelector('#notice').textContent.includes('Start tmux')")
+    assert await page.evaluate('sent.every(x => JSON.parse(x).type === "resize")')
+    # A guest service from before browsing existed asks for an update instead.
+    await context.add_init_script('window.legacyGuest = true')
+    await page.reload()
+    await page.wait_for_function('window.testTerm && window.sent.length > 0')
+    await page.evaluate('window.sent = []')
+    await page.get_by_role('button', name='Browse output', exact=True).click()
+    await page.wait_for_function("document.querySelector('#notice').textContent.includes('Stop, then Resume')")
+    assert await page.evaluate('sent.every(x => JSON.parse(x).type === "resize")')
     await context.close()
-    print("PASS desktop: mouse selection, typing/Enter, root websocket, optional addon failure", flush=True)
+    print("PASS desktop: tmux browse mode via wheel, mouse selection, typing/Enter, root websocket, optional addon failure", flush=True)
 
 
 async def main():
@@ -368,4 +460,5 @@ async def main():
             await browser.close()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

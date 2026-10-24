@@ -66,11 +66,11 @@ func PageHTML() string {
 	return strings.NewReplacer("/* TERMINAL_CSS */", terminalCSS, "/* TERMINAL_JS */", terminalJS).Replace(terminalPage)
 }
 
-func sendBinary(conn *websocket.Conn, mu *sync.Mutex, payload []byte) error {
+func sendMessage(conn *websocket.Conn, mu *sync.Mutex, kind int, payload []byte) error {
 	mu.Lock()
 	defer mu.Unlock()
 	_ = conn.SetWriteDeadline(time.Now().Add(20 * time.Second))
-	return conn.WriteMessage(websocket.BinaryMessage, payload)
+	return conn.WriteMessage(kind, payload)
 }
 
 func HandleWS(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +105,17 @@ func handleWS(w http.ResponseWriter, r *http.Request, identity *Identity) {
 	command.Env = Environment()
 	if identity != nil {
 		command.Env = ProtectedEnvironment()
+	}
+	var browser *tmuxBrowser
+	if err := prepareTmuxWrapper(command, wrapperDirectory()); err != nil {
+		log.Printf("tmux wrapper setup failed: %v", err)
+	} else if envValue(command.Env, "WEB_TERMINAL_TMUX") != "" {
+		if browser, err = newTmuxBrowser(command, identity); err != nil {
+			log.Print("native tmux browsing setup failed")
+		}
+	}
+	defer browser.close()
+	if identity != nil {
 		if err := protectCommand(command, *identity); err != nil {
 			log.Print("protected terminal startup failed")
 			return
@@ -121,11 +132,21 @@ func handleWS(w http.ResponseWriter, r *http.Request, identity *Identity) {
 		_ = command.Wait()
 	}()
 	_ = pty.Setsize(ptmx, &pty.Winsize{Cols: 120, Rows: 40})
+	serveTerminal(conn, ptmx, browser)
+	log.Printf("ws finished remote=%s", remote)
+}
 
+func serveTerminal(conn *websocket.Conn, ptmx *os.File, browser *tmuxBrowser) {
+	remote := conn.RemoteAddr().String()
 	var writeMu sync.Mutex
+	ready, _ := json.Marshal(map[string]any{"type": "browse-ready", "tmux": browser != nil})
+	if err := sendMessage(conn, &writeMu, websocket.TextMessage, ready); err != nil {
+		return
+	}
 	stop := make(chan struct{})
 	var stopOnce sync.Once
 	stopKeepalive := func() { stopOnce.Do(func() { close(stop) }) }
+	defer stopKeepalive()
 
 	go func() {
 		for {
@@ -144,12 +165,16 @@ func handleWS(w http.ResponseWriter, r *http.Request, identity *Identity) {
 		}
 	}()
 
+	outputDone := make(chan struct{})
+	defer func() { browser.close(); ptmx.Close(); <-outputDone }()
 	go func() {
+		defer close(outputDone)
+		defer conn.Close()
 		buffer := make([]byte, 64*1024)
 		for {
 			count, readErr := ptmx.Read(buffer)
 			if count > 0 {
-				if writeErr := sendBinary(conn, &writeMu, buffer[:count]); writeErr != nil {
+				if writeErr := sendMessage(conn, &writeMu, websocket.BinaryMessage, buffer[:count]); writeErr != nil {
 					log.Printf("pty output failed remote=%s error=%v", remote, writeErr)
 					stopKeepalive()
 					return
@@ -180,7 +205,18 @@ func handleWS(w http.ResponseWriter, r *http.Request, identity *Identity) {
 			continue
 		}
 		var resize resizeMessage
-		if json.Unmarshal(payload, &resize) == nil && resize.Type == "resize" && resize.Cols > 0 && resize.Rows > 0 {
+		if messageType == websocket.TextMessage && json.Unmarshal(payload, &resize) == nil && resize.Type == "tmux-browse" {
+			var request browseRequest
+			if json.Unmarshal(payload, &request) != nil {
+				continue
+			}
+			state, _ := json.Marshal(browser.request(request))
+			if err := sendMessage(conn, &writeMu, websocket.TextMessage, state); err != nil {
+				break
+			}
+			continue
+		}
+		if messageType == websocket.TextMessage && resize.Type == "resize" && resize.Cols > 0 && resize.Rows > 0 {
 			if err := pty.Setsize(ptmx, &pty.Winsize{Cols: resize.Cols, Rows: resize.Rows}); err != nil {
 				log.Printf("pty resize failed remote=%s cols=%d rows=%d error=%v", remote, resize.Cols, resize.Rows, err)
 			}
@@ -191,8 +227,6 @@ func handleWS(w http.ResponseWriter, r *http.Request, identity *Identity) {
 			break
 		}
 	}
-	stopKeepalive()
-	log.Printf("ws finished remote=%s", remote)
 }
 
 func Handler() http.Handler {
