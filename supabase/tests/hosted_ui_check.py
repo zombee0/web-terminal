@@ -129,6 +129,9 @@ async def main():
         await details.wait_for()
         assert 'Small terminal' in await details.locator('dl').inner_text()
         await page.locator('.hosted-port-empty').wait_for()
+        # The empty state spans the list instead of the port row's narrow first column.
+        assert await page.locator('.hosted-port-empty').evaluate('el => el.getBoundingClientRect().width >= el.parentElement.getBoundingClientRect().width - 1 && el.getBoundingClientRect().height < 80')
+        await page.screenshot(path=str(OUT/'box-details-empty.png'))
         assert 'without signing in' in await details.inner_text()
         for port in ('8000', '5173'):
             await page.locator('#hosted-port-input').fill(port)

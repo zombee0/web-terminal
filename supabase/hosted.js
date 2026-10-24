@@ -55,7 +55,7 @@ const hostedAccountStyles = `
   .hosted-port-list a { color: var(--cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hosted-port-list span { gap: 6px; }
   .hosted-port-list button { padding: 6px 8px; font-size: 10px; }
-  .hosted-port-empty { color: var(--muted); font-size: 11px; }
+  .hosted-port-list li.hosted-port-empty { display: block; padding: 18px 14px; border-style: dashed; color: var(--muted); font-size: 11px; line-height: 1.6; text-align: center; }
   .hosted-details-error { min-height: 1.6em; color: var(--red); font-size: 11px; margin: 8px 0 0; }
   .hosted-details-close { display: flex; justify-content: flex-end; margin-top: 16px; }
   @media (max-width: 520px) {
