@@ -13,7 +13,9 @@
   const coarsePointer = matchMedia('(any-pointer: coarse)');
   host.classList.toggle('touch-input', coarsePointer.matches || navigator.maxTouchPoints > 0);
   const term = new Terminal({
-    cursorBlink: true, convertEol: true, scrollback: 10000,
+    // No convertEol: the PTY already maps output newlines, and TUIs such as agy
+    // move down with a bare LF that must keep the cursor column.
+    cursorBlink: true, scrollback: 10000,
     allowProposedApi: true, // Required by the pinned Unicode11 addon's public API.
     fontFamily: "ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Noto Sans Mono CJK SC','PingFang SC','Microsoft YaHei',monospace",
     theme: { background: '#090d12', selectionBackground: '#3b6189', selectionInactiveBackground: '#3b6189' }

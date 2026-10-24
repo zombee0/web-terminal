@@ -164,6 +164,14 @@ async def links(page, touch=None):
     assert await tap(7, row) == ["https://example.com/a"]
 
 
+async def cursor_column(page):
+    """A bare LF keeps the column, as TUIs expect when they redraw a status row."""
+    # agy after a keystroke: status row two lines down, then back up to the input.
+    await write(page, "> a\r\n\r\n\x1b[3A\x1b[3C\x1b[?25l\n\n\x1b[5C x\x1b[2A\x1b[7D\x1b[?25hb")
+    line = await page.evaluate("testTerm.buffer.active.getLine(0).translateToString(true)")
+    assert line == "> ab", repr(line)
+
+
 async def browse_mode(page, touch=None):
     """Browse output drives tmux copy mode in place: no separate reader."""
     await page.evaluate("window.tmux = {available: true, active: false, position: 0, history: 300}; window.sent = []")
@@ -234,6 +242,7 @@ async def mobile(browser, name, sources, chromium=False):
     assert not await page.evaluate("document.activeElement === testTerm.textarea"), "Mobile must not autofocus"
     touch = Touch(page, await context.new_cdp_session(page) if chromium else None)
     await links(page, touch)
+    await cursor_column(page)
     await browse_mode(page, touch)
     menu = page.locator("#selection-menu")
 
@@ -464,6 +473,7 @@ async def desktop(browser, sources):
     await page.keyboard.press("Enter")
     assert await page.evaluate("sent.filter(x => !x.startsWith('{')).join('')") == "pwd\r"
     await links(page)
+    await cursor_column(page)
     await browse_mode(page)
     await context.add_init_script('window.disableTmux = true')
     await page.reload()
