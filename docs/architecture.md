@@ -76,6 +76,8 @@ able to reach that CDN.
   `[tui] alternate_screen = "never"` in the guest's `~/.codex/config.toml`
   (on every install and Resume, unless the user already chose a value), and
   Codex output then accumulates in tmux history like ordinary shell output.
+  The optional Antigravity CLI (`agy`) gets `"altScreenMode": "never"` in
+  `~/.gemini/antigravity-cli/settings.json` for the same reason.
   At tmux's oldest retained row, browsing simply stays at the top
   (`history-limit` sets how far back that is). **Back to terminal**, Escape or
   `q` cancel copy mode; the program's screen, the shell draft and its caret are
@@ -91,6 +93,15 @@ able to reach that CDN.
   the tmux server environment. Nothing is recorded to disk. The wrapper lives
   in `/var/lib/web-terminal/bin` (root-owned) for the protected service, or
   `~/.local/state/web-terminal/bin` for standalone use.
+- Tap a URL to open it in a new tab; on desktop, click it. Sign-in flows often
+  print long URLs that the CLI itself cuts at the pane width (agy indents each
+  piece). Rows that fill the width and continue with a single URL-safe token
+  are joined, as are xterm's own soft wraps, so any row of the URL opens it.
+- Hosted Boxes may opt in to Google's free Gemini tier at creation. Google's
+  OAuth consent must go to its own CLI client, so provisioning only installs
+  `agy` and marks the Box; the first interactive shell claims the marker and
+  starts `agy`, which prints the Google link and waits for the pasted code.
+  Credentials stay in the Box (`agy` falls back to a file without a keyring).
 - Tap the terminal to focus the software keyboard. Mobile pages do not focus
   the terminal automatically when the WebSocket connects.
 - Hold for 450 ms to select a word and open Copy / Paste / Select all / Done.

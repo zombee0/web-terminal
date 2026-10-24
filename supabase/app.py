@@ -20,7 +20,7 @@ from supabase.auth import Auth, AuthenticationError, AuthProviderError
 from supabase.config import ROOT, required
 from supabase.crypto import Crypto
 from supabase.database import create_pool
-from supabase.store import Conflict, NotFound, Store, public_box, public_job, validate_resources
+from supabase.store import Conflict, NotFound, Store, public_box, public_job, validate_agy_trial, validate_resources
 from supabase.worker import Worker
 
 
@@ -178,7 +178,8 @@ class Gateway:
         name = str(data.get("name") or "My terminal").strip()
         if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
             raise ValueError()
-        job = await self.store.create(session["user_id"], name, self.idempotency(request), validate_resources(data))
+        job = await self.store.create(session["user_id"], name, self.idempotency(request), validate_resources(data),
+                                      agy_trial=validate_agy_trial(data))
         return web.json_response({"job": public_job(job)}, status=202)
 
     async def operate(self, request):

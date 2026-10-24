@@ -36,6 +36,9 @@ const hostedAccountStyles = `
   .hangar-hosted #fleet { overflow-x: auto; }
   .hangar-hosted #fleet table { min-width: 820px; }
   .hosted-quota { color: var(--cyan); font-size: 11px; line-height: 1.6; margin-top: 12px; }
+  .hosted-option { display: flex; align-items: center; gap: 8px; margin-top: 14px; color: var(--text); font-size: 11px; letter-spacing: .06em; cursor: pointer; }
+  .hosted-option input { width: 16px; height: 16px; margin: 0; accent-color: var(--green); }
+  .hosted-option-note { color: var(--muted); font-size: 10px; line-height: 1.6; margin: 4px 0 0 24px; }
   @media (max-width: 960px) {
     .hangar-hosted header { grid-template-columns: minmax(0, 1fr); gap: 18px; }
     .hosted-header-tools { width: 100%; }
@@ -106,6 +109,20 @@ window.HANGAR_HOSTED = {
     const quota = document.createElement("div"); quota.id = "hosted-quota"; quota.className = "hosted-quota";
     quota.setAttribute("role", "status");
     document.getElementById("target-hint").after(quota);
+    // Google's consent must go to its own CLI client, so the Box only installs
+    // agy; the user signs in with Google in the first terminal they open.
+    const gemini = document.createElement("label");
+    gemini.className = "hosted-option";
+    const geminiInput = document.createElement("input");
+    geminiInput.type = "checkbox";
+    geminiInput.id = "hosted-gemini";
+    geminiInput.setAttribute("aria-describedby", "hosted-gemini-note");
+    gemini.append(geminiInput, document.createTextNode("TRY GEMINI FREE TIER"));
+    const geminiNote = document.createElement("div");
+    geminiNote.id = "hosted-gemini-note";
+    geminiNote.className = "hosted-option-note";
+    geminiNote.textContent = "Installs Google's Antigravity CLI (agy). When you first open the terminal, tap the Google link, approve, and paste the code shown. Google sets the free usage limits.";
+    quota.after(gemini, geminiNote);
     new MutationObserver(() => {
       const labels = { open: "Open your terminal after sign-in and ownership checks", copy: "Copy a link that requires the Box owner's sign-in",
         stop: "Stop the Box; keep its data and resource allocation", resume: "Start the stopped Box", delete: "Permanently delete the Box and its data" };
@@ -181,6 +198,9 @@ window.HANGAR_HOSTED = {
     const label = document.getElementById("hosted-quota");
     if (label) label.textContent = !this.user ? "Sign in to view your available resources." : !this.loaded ? "Loading your allocation…"
       : `AVAILABLE: ${Math.max(0, 2-this.used.cpus)} CPU / ${Math.max(0, 4096-this.used.memory_mib)} MiB · 10 GB disk max per Box`;
+  },
+  createOptions() {
+    return { gemini: document.getElementById("hosted-gemini").checked };
   },
   headers(method) {
     return method && method !== "GET" ? { "X-CSRF-Token": this.csrf || "", "Idempotency-Key": crypto.randomUUID() } : {};

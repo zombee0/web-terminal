@@ -272,17 +272,80 @@ staged.replace(path)
 """
 
 
-def codex_inline_command():
+# The Antigravity CLI has the same choice in its JSON settings ("never" is its
+# inline mode; verified with agy 1.4.7 in tmux).
+AGY_INLINE_SCRIPT = r"""
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+try:
+    settings = json.loads(path.read_text()) if path.exists() else {}
+except ValueError:
+    settings = None
+if not isinstance(settings, dict):
+    print("WARNING: left agy settings unchanged", file=sys.stderr)
+    sys.exit(0)
+if "altScreenMode" in settings:
+    sys.exit(0)
+settings["altScreenMode"] = "never"
+path.parent.mkdir(parents=True, exist_ok=True)
+staged = path.with_name(path.name + ".web-terminal")
+staged.write_text(json.dumps(settings, indent=2) + "\n")
+staged.chmod(0o600)
+staged.replace(path)
+"""
+
+
+def inline_cli_command():
     return (
         "if command -v python3 >/dev/null; then\n"
         f"  runuser -u boxlite -- python3 -c {shlex.quote(CODEX_INLINE_SCRIPT)} /home/boxlite/.codex/config.toml"
         " || echo 'WARNING: could not configure Codex inline mode' >&2\n"
+        "  if [ -x /home/boxlite/.local/bin/agy ]; then\n"
+        f"    runuser -u boxlite -- python3 -c {shlex.quote(AGY_INLINE_SCRIPT)} /home/boxlite/.gemini/antigravity-cli/settings.json"
+        " || echo 'WARNING: could not configure agy inline mode' >&2\n"
+        "  fi\n"
         "fi\n"
     )
 
 
-async def configure_codex_inline(box, *, log=None):
-    await run_checked(box, "sh", args=["-c", codex_inline_command()], user="root", timeout_secs=30, log=log)
+async def configure_inline_clis(box, *, log=None):
+    await run_checked(box, "sh", args=["-c", inline_cli_command()], user="root", timeout_secs=30, log=log)
+
+
+# Optional per Box: Google's free Gemini tier runs through the Antigravity CLI.
+# Its OAuth consent must be given to Google's own client, so the first terminal
+# opened after setup starts the sign-in; the user approves and pastes the code.
+# Credentials stay in the Box (agy falls back to a file without a keyring).
+AGY_SIGNIN_MARKER = "/home/boxlite/.config/web-terminal/agy-signin"
+INSTALL_AGY_COMMAND = r"""
+set -eu
+install -d -o boxlite -g boxlite /home/boxlite/.local/bin /home/boxlite/.config /home/boxlite/.config/web-terminal
+if ! timeout 600s su -s /bin/bash boxlite -c \
+  'HOME=/home/boxlite PATH=/home/boxlite/.local/bin:/usr/local/bin:/usr/bin:/bin sh -c "curl --connect-timeout 10 --max-time 60 -fsSL https://antigravity.google/cli/install.sh | bash"'; then
+  echo "WARNING: Antigravity CLI installation failed; continuing without agy" >&2
+  exit 0
+fi
+su -s /bin/bash boxlite -c 'HOME=/home/boxlite /home/boxlite/.local/bin/agy --version'
+install -m 0600 -o boxlite -g boxlite /dev/null __MARKER__
+grep -q 'web-terminal: agy sign-in' /home/boxlite/.bashrc 2>/dev/null || cat >> /home/boxlite/.bashrc <<'BASHRC'
+
+# web-terminal: agy sign-in, once, in the first terminal opened after setup.
+if mv "$HOME/.config/web-terminal/agy-signin" "$HOME/.config/web-terminal/agy-signin.started" 2>/dev/null; then
+  printf '
+Gemini free tier: tap the Google link below, approve, then paste the code here.
+Usage limits are set by Google. Run agy again any time.
+
+'
+  agy
+fi
+BASHRC
+chown boxlite:boxlite /home/boxlite/.bashrc
+""".replace("__MARKER__", AGY_SIGNIN_MARKER)
+
+
+async def install_agy_cli(box, *, log=None):
+    _emit(log, "installing Antigravity CLI (agy) inside Box")
+    await run_checked(box, "sh", args=["-c", INSTALL_AGY_COMMAND], user="root", timeout_secs=900, log=log)
 
 
 def protected_start_command():
@@ -313,7 +376,7 @@ async def install_web_terminal(box, mode, *, log=None, gateway_config=None):
             + protected_start_command()
         )
         await run_checked(box, "sh", args=["-lc", command], user="root", timeout_secs=60, log=log)
-        await configure_codex_inline(box, log=log)
+        await configure_inline_clis(box, log=log)
         return
     await box.copy_in(str(app_path(mode)), "/home/boxlite/.web-terminal-upload")
     await run_checked(
@@ -324,10 +387,11 @@ async def install_web_terminal(box, mode, *, log=None, gateway_config=None):
         timeout_secs=60,
         log=log,
     )
-    await configure_codex_inline(box, log=log)
+    await configure_inline_clis(box, log=log)
 
 
-async def provision_web_terminal(runtime, box, mode, *, host_port=None, log=None, gateway_config=None, publish_url=True):
+async def provision_web_terminal(runtime, box, mode, *, host_port=None, log=None, gateway_config=None, publish_url=True,
+                                 install_agy=False):
     _emit(log, "starting box")
     await ensure_started(runtime, box, mode)
     _emit(log, "bootstrapping guest packages")
@@ -356,6 +420,8 @@ async def provision_web_terminal(runtime, box, mode, *, host_port=None, log=None
         log=log,
     )
     await install_agent_clis(box, mode, log=log)
+    if install_agy:
+        await install_agy_cli(box, log=log)
     _emit(log, "installing web-terminal")
     await install_web_terminal(box, mode, log=log, gateway_config=gateway_config)
     _emit(log, "waiting for guest /healthz")
