@@ -17,6 +17,29 @@ def validate_resources(data):
     return result
 
 
+def validate_agy_trial(data):
+    value = data.get("gemini", False)
+    if type(value) is not bool:
+        raise ValueError('Invalid Gemini option')
+    return value
+
+
+TERMINAL_PORT = 3001
+MAX_PUBLIC_PORTS = 10
+
+
+def validate_port(value):
+    if type(value) is not int or not 1 <= value <= 65535:
+        raise ValueError('Invalid port')
+    if value == TERMINAL_PORT:
+        raise Conflict('Port 3001 is the terminal; it stays behind your sign-in')
+    return value
+
+
+def public_port(row):
+    return {"port": row["port"], "url": row["url"], "created_at": row["created_at"].isoformat()}
+
+
 def box_resources(row):
     return {key: row[key] for key in RESOURCES}
 
@@ -34,6 +57,7 @@ def public_box(row):
         return None
     return {"id": str(row["id"]), "name": row["name"], "runtime": "cloud",
             "status": row["status"], "resources": box_resources(row), **box_resources(row),
+            "gemini": row["agy_trial"],
             "created_at": row["created_at"].isoformat(),
             "access_url": f'/terminal/{row["id"]}/', "url": None,
             "error": row["failure_code"], "busy": row["status"] in {"creating", "starting", "stopping", "deleting"}}
@@ -67,7 +91,7 @@ class Store:
     async def jobs(self, owner):
         return await self.pool.fetch("SELECT * FROM jobs WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50", owner)
 
-    async def create(self, owner, name, key, resources=None):
+    async def create(self, owner, name, key, resources=None, agy_trial=False):
         resources = validate_resources(resources or {})
         try:
             async with self.pool.acquire() as conn, conn.transaction():
@@ -81,10 +105,10 @@ class Store:
                             raise Conflict("Idempotency key already used")
                         return previous
                 box_id, job_id = uuid.uuid4(), uuid.uuid4()
-                await conn.execute("""INSERT INTO boxes(id,owner_id,name,provider_name,status,cpus,memory_mib,disk_size_gb)
-                    VALUES($1,$2,$3,$4,'creating',$5,$6,$7)""",
+                await conn.execute("""INSERT INTO boxes(id,owner_id,name,provider_name,status,cpus,memory_mib,disk_size_gb,agy_trial)
+                    VALUES($1,$2,$3,$4,'creating',$5,$6,$7,$8)""",
                     box_id, owner, name, "web-terminal-user-" + box_id.hex,
-                    resources['cpus'], resources['memory_mib'], resources['disk_size_gb'])
+                    resources['cpus'], resources['memory_mib'], resources['disk_size_gb'], bool(agy_trial))
                 job = await conn.fetchrow("""INSERT INTO jobs(id,box_id,owner_id,operation,idempotency_key)
                     VALUES($1,$2,$3,'create',$4) RETURNING *""", job_id, box_id, owner, key)
                 await conn.execute("""INSERT INTO lifecycle_events(box_id,actor_id,job_id,event,to_state)
@@ -131,6 +155,28 @@ class Store:
             await conn.execute("""INSERT INTO lifecycle_events(box_id,actor_id,job_id,event,from_state,to_state)
                 VALUES($1,$2,$3,$4,$5,$6)""", box_id, owner, job["id"], operation+"_requested", box["status"], state)
             return job
+
+    async def ports(self, owner, box_id):
+        await self.box(owner, box_id)
+        return await self.pool.fetch("SELECT * FROM box_ports WHERE box_id=$1 ORDER BY port", box_id)
+
+    async def add_port(self, owner, box_id, port, url):
+        async with self.pool.acquire() as conn, conn.transaction():
+            # Lock the Box so concurrent requests cannot pass the limit together.
+            box = await conn.fetchrow("SELECT id FROM boxes WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL FOR UPDATE", box_id, owner)
+            if box is None:
+                raise NotFound()
+            existing = await conn.fetchrow("SELECT * FROM box_ports WHERE box_id=$1 AND port=$2", box_id, port)
+            if existing:
+                return await conn.fetchrow("UPDATE box_ports SET url=$3 WHERE box_id=$1 AND port=$2 RETURNING *", box_id, port, url)
+            if await conn.fetchval("SELECT count(*) FROM box_ports WHERE box_id=$1", box_id) >= MAX_PUBLIC_PORTS:
+                raise Conflict(f'A Box can expose at most {MAX_PUBLIC_PORTS} ports. Remove one first.')
+            return await conn.fetchrow("INSERT INTO box_ports(box_id,port,url) VALUES($1,$2,$3) RETURNING *", box_id, port, url)
+
+    async def remove_port(self, owner, box_id, port):
+        await self.box(owner, box_id)
+        if await self.pool.fetchval("DELETE FROM box_ports WHERE box_id=$1 AND port=$2 RETURNING port", box_id, port) is None:
+            raise NotFound()
 
     async def claim(self, worker):
         return await self.pool.fetchrow("""WITH candidate AS (

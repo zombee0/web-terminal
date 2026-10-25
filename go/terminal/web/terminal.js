@@ -13,7 +13,9 @@
   const coarsePointer = matchMedia('(any-pointer: coarse)');
   host.classList.toggle('touch-input', coarsePointer.matches || navigator.maxTouchPoints > 0);
   const term = new Terminal({
-    cursorBlink: true, convertEol: true, scrollback: 10000,
+    // No convertEol: the PTY already maps output newlines, and TUIs such as agy
+    // move down with a bare LF that must keep the cursor column.
+    cursorBlink: true, scrollback: 10000,
     allowProposedApi: true, // Required by the pinned Unicode11 addon's public API.
     fontFamily: "ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Noto Sans Mono CJK SC','PingFang SC','Microsoft YaHei',monospace",
     theme: { background: '#090d12', selectionBackground: '#3b6189', selectionInactiveBackground: '#3b6189' }
@@ -321,6 +323,66 @@
       menu.style.top = clamp(top >= 4 ? top : y + height + 60, 4, bounds.height - menu.offsetHeight - 4) + 'px';
     }
   }
+  // Sign-in flows (agy, Codex, Claude Code) print long URLs. Some wrap them
+  // themselves at the pane width, so a link may continue on following rows as
+  // a single indented token. Join those rows, and xterm's soft wraps, before
+  // matching, and keep each character's cell so taps and clicks map back.
+  const urlPattern = /https?:\/\/[^\s"'<>`]+/g;
+  function rowCells(y) {
+    const line = term.buffer.active.getLine(y);
+    const cells = [];
+    for (let x = 0; line && x < term.cols; x++) {
+      const cell = line.getCell(x);
+      if (!cell || cell.getWidth() === 0) continue;
+      cells.push({ char: cell.getChars() || ' ', x, y });
+    }
+    while (cells.length && cells[cells.length - 1].char === ' ') cells.pop();
+    return cells;
+  }
+  function continues(y) {
+    const line = term.buffer.active.getLine(y);
+    if (!line) return false;
+    if (line.isWrapped) return true;
+    const above = rowCells(y - 1);
+    const text = rowCells(y).map(cell => cell.char).join('').trim();
+    return above.length >= term.cols - 2 && /\S$/.test(above.map(cell => cell.char).join('')) &&
+      /^[\w\-.~:/?#[\]@!$&'()*+,;=%]+$/.test(text);
+  }
+  function linksNear(y) {
+    let top = y;
+    while (top > 0 && y - top < 20 && continues(top)) top--;
+    let bottom = y;
+    while (bottom - y < 20 && bottom + 1 < term.buffer.active.length && continues(bottom + 1)) bottom++;
+    const cells = [];
+    for (let row = top; row <= bottom; row++) {
+      const line = rowCells(row);
+      const indent = row > top && !term.buffer.active.getLine(row).isWrapped ? line.findIndex(cell => cell.char !== ' ') : 0;
+      cells.push(...line.slice(Math.max(0, indent)));
+    }
+    const text = cells.map(cell => cell.char).join('');
+    const links = [];
+    for (const match of text.matchAll(urlPattern)) {
+      const url = match[0].replace(/[.,;:!?)\]}'"]+$/, '');
+      links.push({ url, cells: cells.slice(match.index, match.index + url.length) });
+    }
+    return links;
+  }
+  function linkAt(x, y) {
+    const point = pointToCell(x, y);
+    return linksNear(point.row).find(link => link.cells.some(cell => cell.x === point.col && cell.y === point.row))?.url;
+  }
+  function openLink(url) { window.open(url, '_blank', 'noopener'); }
+  term.registerLinkProvider({
+    provideLinks(line, callback) {
+      const y = line - 1;
+      callback(linksNear(y).filter(link => link.cells.some(cell => cell.y === y)).map(link => {
+        const first = link.cells[0], last = link.cells[link.cells.length - 1];
+        return { text: link.url, range: { start: { x: first.x + 1, y: first.y + 1 }, end: { x: last.x + 1, y: last.y + 1 } },
+          activate: () => openLink(link.url) };
+      }));
+    }
+  });
+
   term.onSelectionChange(renderSelection);
   term.onScroll(renderSelection);
   let bufferType = term.buffer.active.type;
@@ -464,7 +526,9 @@
     cancelGesture();
     if (g.mode === 'pending') {
       dismiss();
-      if (!g.hadSelection && !browsing && !browseOpening) term.focus();
+      const url = !g.hadSelection && linkAt(g.x, g.y);
+      if (url) openLink(url);
+      else if (!g.hadSelection && !browsing && !browseOpening) term.focus();
     }
     renderSelection();
   }, { passive: false, capture: true });

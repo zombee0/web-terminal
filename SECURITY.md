@@ -16,7 +16,10 @@ authenticate agent CLIs inside the box after it starts.
 
 ## Exposure rules
 
-- Publish only guest port `3001`. Never expose `22222`.
+- Guest port `3001` (the terminal) is only reachable through an
+  authenticated path. In Supabase mode, Box owners may expose other guest ports
+  publicly, with no authentication, from the Box details view; the gateway
+  refuses `3001`. Anyone with such a link reaches that port.
 - Hangar (`python3 -m hangar.control`) binds `127.0.0.1:3100` by default. Do
   not publish the control plane.
 - The Go service has no end-user auth. Put an authenticated proxy in front

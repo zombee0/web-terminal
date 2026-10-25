@@ -18,6 +18,8 @@ HTML = (OUT / "terminal.html").read_text()
 FIXTURE = """() => {
   window.sent = [];
   window.tmux = {available: true, active: false, position: 0, history: 300};
+  window.opened = [];
+  window.open = url => { window.opened.push(url); return null; };
   window.clipboardText = '';
   window.clipboardDenied = false;
   Object.defineProperty(navigator, 'clipboard', {value: {
@@ -104,6 +106,10 @@ class Touch:
         await self.page.wait_for_timeout(520)
         await self.event("touchEnd", x, y)
 
+    async def tap(self, x, y):
+        await self.event("touchStart", x, y)
+        await self.event("touchEnd", x, y)
+
     async def swipe(self, x, y, end_y):
         await self.event("touchStart", x, y)
         for step in range(1, 9):
@@ -124,6 +130,46 @@ async def point(page, col, row):
       const r = document.querySelector('.xterm-screen').getBoundingClientRect();
       return [r.left + (col + .5) * r.width / testTerm.cols, r.top + (row + .5) * r.height / testTerm.rows];
     }""", {"col": col, "row": row})
+
+
+async def links(page, touch=None):
+    """Tapping or clicking a URL opens it, even when a CLI wrapped it itself."""
+    cols = await page.evaluate("testTerm.cols")
+    url = "https://accounts.google.com/o/oauth2/auth?client_id=" + "".join(chr(97 + i % 26) for i in range(3 * cols)) + "&state=END"
+    # agy prints its sign-in URL indented by one space and cut at the pane width.
+    width = cols - 1
+    rows = [url[i:i + width] for i in range(0, len(url), width)]
+    await write(page, " Open this link:\r\n\r\n" + "".join(f" {row}\r\n" for row in rows) + "\r\n paste the code below\r\n")
+
+    async def tap(col, row):
+        x, y = await point(page, col, row)
+        if touch:
+            await touch.tap(x, y)
+        else:
+            await page.mouse.move(x, y)
+            await page.wait_for_timeout(100)
+            await page.mouse.click(x, y)
+        await page.wait_for_timeout(100)
+        return await page.evaluate("window.opened.splice(0)")
+
+    assert await tap(5, 4) == [url], "middle row of a hard-wrapped URL"
+    assert await tap(2, 2 + len(rows) - 1) == [url], "last row of a hard-wrapped URL"
+    assert await tap(3, 0) == [], "plain text is not a link"
+    assert await tap(3, 2 + len(rows) + 1) == [], "text after the URL is not part of it"
+    # xterm's own soft wrap, and trailing punctuation.
+    long = "https://example.com/" + "x" * (2 * cols)
+    await write(page, f"see {long}\r\nand https://example.com/a.\r\n")
+    assert await tap(4, 1) == [long]
+    row = await page.evaluate("[...Array(testTerm.rows).keys()].find(y => testTerm.buffer.active.getLine(y).translateToString(true).startsWith('and https'))")
+    assert await tap(7, row) == ["https://example.com/a"]
+
+
+async def cursor_column(page):
+    """A bare LF keeps the column, as TUIs expect when they redraw a status row."""
+    # agy after a keystroke: status row two lines down, then back up to the input.
+    await write(page, "> a\r\n\r\n\x1b[3A\x1b[3C\x1b[?25l\n\n\x1b[5C x\x1b[2A\x1b[7D\x1b[?25hb")
+    line = await page.evaluate("testTerm.buffer.active.getLine(0).translateToString(true)")
+    assert line == "> ab", repr(line)
 
 
 async def browse_mode(page, touch=None):
@@ -195,6 +241,8 @@ async def mobile(browser, name, sources, chromium=False):
     assert await page.evaluate("socket.binaryType") == "arraybuffer"
     assert not await page.evaluate("document.activeElement === testTerm.textarea"), "Mobile must not autofocus"
     touch = Touch(page, await context.new_cdp_session(page) if chromium else None)
+    await links(page, touch)
+    await cursor_column(page)
     await browse_mode(page, touch)
     menu = page.locator("#selection-menu")
 
@@ -424,6 +472,8 @@ async def desktop(browser, sources):
     await page.keyboard.type("pwd")
     await page.keyboard.press("Enter")
     assert await page.evaluate("sent.filter(x => !x.startsWith('{')).join('')") == "pwd\r"
+    await links(page)
+    await cursor_column(page)
     await browse_mode(page)
     await context.add_init_script('window.disableTmux = true')
     await page.reload()

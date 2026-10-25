@@ -21,7 +21,9 @@ Aliases: `BOXLITE_RUNTIME=rest|remote` → cloud; `local` → embedded.
 
 ## Non-negotiables
 
-- Publish **only** port `3001`. Never expose `22222`.
+- The terminal (port `3001`) is never published without authentication.
+  In Supabase mode, Box owners may expose their own guest ports publicly from
+  the Box details view; `3001` is refused there.
 - Never print, commit, or log `BOXLITE_API_KEY`, preview URLs, or
   `BOXLITE_BOX_AUTH_KEY`. Treat the full cloud URL as a secret.
 - Do not put API keys, ChatGPT credentials, or SSH keys in images or guest

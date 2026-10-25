@@ -18,5 +18,4 @@ otherwise.
 > The scripts and commands in this directory are provisional and must not be
 > represented as production-ready until clean-environment validation succeeds.
 
-The image and manifest expose only port `3001`. Port `22222` must not be
-published or added to any external ingress configuration.
+The image and manifest declare port `3001` as the service port.

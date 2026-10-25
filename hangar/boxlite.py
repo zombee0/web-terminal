@@ -286,6 +286,17 @@ def cloud_tunnel_url(box_id, port=PORT):
     return uri
 
 
+def close_cloud_tunnel(box_id, port):
+    """Close a guest port's tunnel; an already-closed tunnel counts as closed."""
+    if not 1 <= int(port) <= 65535:
+        raise ValueError("Invalid tunnel port")
+    try:
+        cloud_api("DELETE", f"/api/v1/boxes/{box_id}/network/tunnel?port={int(port)}")
+    except CloudAPIError as error:
+        if error.status != 404:
+            raise
+
+
 def published_host_port(info, guest_port=PORT):
     if info is None:
         return None

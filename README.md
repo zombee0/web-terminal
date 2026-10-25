@@ -86,8 +86,10 @@ python3 scripts/e2e_web_terminal.py --base-url "$URL"
 
 ## Network
 
-Only port `3001` may be published. Port `22222` must stay internal: no public
-ingress, preview URLs, container publish, or service manifests.
+The service listens on port `3001`. It has no end-user authentication, so it
+is only published behind an authenticated proxy (the Supabase gateway). In
+Supabase mode, Box owners can expose other guest ports publicly, without
+authentication, from the Box details view. Port `3001` cannot be exposed there.
 
 ## Image path
 

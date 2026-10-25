@@ -23,6 +23,8 @@ flowchart LR
 | 自部署 | 保留 Local 默认页、资源选择和直接 OPEN / COPY |
 | Supabase | Cloud 默认、Local 置灰；保留 OPEN / COPY / STOP / RESUME / DELETE，OPEN 和 COPY 使用需要认证的访问链接 |
 | 用户 Box | 每用户所有未删除 Box 合计最多 2 CPU / 4096 MiB；每 Box 磁盘最多 10 GB；创建、停止、错误状态仍占用配额 |
+| 公开端口 | Box 详情（**DETAILS**）里可把 Box 内的端口公开出去，可公开多个（每个 Box 最多 10 个），并列出所有已公开端口及其链接。公开链接**无需登录**，任何拿到链接的人都能访问；终端端口 `3001` 不能公开。Box 停止时链接返回 502，恢复后原链接继续可用；**REMOVE** 关闭该端口 |
+| Gemini 体验 | 创建时可选 **TRY GEMINI FREE TIER**：安装 Google Antigravity CLI（`agy`），首次打开终端自动进入 Google 登录；点链接授权后粘贴授权码。凭据只保存在该 Box 内，免费额度由 Google 决定 |
 | 管理 Box | 4 CPU、8192 MiB、10 GB；只发布 3001；运行网关与 worker |
 | 登录 | 服务端 Google PKCE；浏览器只持有 HttpOnly、Secure 会话 Cookie |
 | 访问 | `/terminal/<应用 UUID>/`；HTTP、WebSocket、任务和 SSE 均检查归属 |

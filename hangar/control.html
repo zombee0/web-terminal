@@ -640,7 +640,8 @@ First provision can take 10-15 minutes.</div>
         const name = $("box-name").value.trim();
         await startAction(`provision ${state.runtime}`, () => api("/api/boxes", {
           method: "POST",
-          body: JSON.stringify(Object.assign({ runtime: state.runtime, name }, readResources()))
+          body: JSON.stringify(Object.assign({ runtime: state.runtime, name }, readResources(),
+            window.HANGAR_HOSTED?.createOptions?.()))
         }));
       } catch (error) { log(`// error ${error.message}`); }
     });

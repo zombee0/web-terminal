@@ -63,9 +63,7 @@ create a Box or reinstall those dependencies.
 
 ## Port Policy
 
-Only port `3001` may be published for this service. Port `22222` must remain
-internal and must not appear in public ingress, preview endpoints, Docker port
-publishing, or marketplace service definitions.
+The service is published on port `3001`, behind authentication.
 
 ## Known Limitations
 
